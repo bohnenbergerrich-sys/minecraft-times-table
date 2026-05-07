@@ -1,0 +1,1 @@
+export default function Home(){return <h1>Minecraft Multiplication Power Grid</h1>}
