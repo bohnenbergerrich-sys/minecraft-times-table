@@ -1,16 +1,12 @@
 "use client";
 
 // PHASE 2 EVOLUTION:
-// Minecraft-style animated dungeon math game
-// Added:
-// - moving monster encounters
-// - destructible blocks
-// - mining loop
+// Added real gameplay systems:
+// - mining blocks
+// - dungeon map
 // - inventory/resources
-// - animated attacks
-// - loot progression
-// - kinetic feedback
-// - dungeon atmosphere
+// - block destruction
+// - combat progression
 
 import { useState } from "react";
 
@@ -114,6 +110,31 @@ export default function Home() {
     setMessage("New monster loaded. Time to craft!");
   }
 
+  const [resources, setResources] = useState({ stone: 0, iron: 0, diamonds: 0 });
+  const [blocks, setBlocks] = useState([
+    { id: 1, type: "stone" },
+    { id: 2, type: "iron" },
+    { id: 3, type: "stone" },
+    { id: 4, type: "diamond" },
+  ]);
+
+  function mineBlock(block) {
+    if (Number(answer) !== problem.answer) {
+      setMessage("⛏️ Solve the formula before mining.");
+      return;
+    }
+
+    setBlocks((prev) => prev.filter((b) => b.id !== block.id));
+
+    if (block.type === "stone") setResources((r) => ({ ...r, stone: r.stone + 1 }));
+    if (block.type === "iron") setResources((r) => ({ ...r, iron: r.iron + 1 }));
+    if (block.type === "diamond") setResources((r) => ({ ...r, diamonds: r.diamonds + 1 }));
+
+    setProblem(newProblem());
+    setAnswer("");
+    setMessage(`💥 You mined ${block.type}!`);
+  }
+
   return (
     <main style={{
       minHeight: "100vh",
@@ -122,7 +143,56 @@ export default function Home() {
       fontFamily: "Arial, sans-serif",
       padding: 24,
     }}>
-      <div style={{ maxWidth: 980, margin: "0 auto" }}>
+      <div style={{ maxWidth: 1100, margin: "0 auto" }}>
+
+        <section style={{
+          background: "#111827",
+          borderRadius: 24,
+          padding: 20,
+          marginBottom: 20,
+          border: "2px solid #22c55e",
+        }}>
+          <h2 style={{ fontSize: 28 }}>⛏️ Dungeon Mine</h2>
+
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, 1fr)',
+            gap: 16,
+            marginTop: 20,
+          }}>
+            {blocks.map((block) => (
+              <div
+                key={block.id}
+                onClick={() => mineBlock(block)}
+                style={{
+                  height: 120,
+                  borderRadius: 18,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: 52,
+                  background:
+                    block.type === 'stone'
+                      ? '#6b7280'
+                      : block.type === 'iron'
+                      ? '#9ca3af'
+                      : '#06b6d4',
+                }}
+              >
+                {block.type === 'stone' && '🪨'}
+                {block.type === 'iron' && '⛓️'}
+                {block.type === 'diamond' && '💎'}
+              </div>
+            ))}
+          </div>
+
+          <div style={{ marginTop: 20, display: 'flex', gap: 20, fontSize: 20 }}>
+            <div>🪨 {resources.stone}</div>
+            <div>⛓️ {resources.iron}</div>
+            <div>💎 {resources.diamonds}</div>
+          </div>
+        </section>
         <h1 style={{ fontSize: 44, marginBottom: 8 }}>Minecraft Monster 1x1</h1>
         <p style={{ fontSize: 20, color: "#bbf7d0" }}>
           Solve multiplication recipes. Craft weapons. Defeat monsters.
