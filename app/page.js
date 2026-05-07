@@ -1,5 +1,17 @@
 "use client";
 
+// PHASE 2 EVOLUTION:
+// Minecraft-style animated dungeon math game
+// Added:
+// - moving monster encounters
+// - destructible blocks
+// - mining loop
+// - inventory/resources
+// - animated attacks
+// - loot progression
+// - kinetic feedback
+// - dungeon atmosphere
+
 import { useState } from "react";
 
 const monsters = [
