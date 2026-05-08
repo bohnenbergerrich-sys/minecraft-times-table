@@ -4,24 +4,27 @@ import { useEffect, useMemo, useState } from "react";
 
 const W = 6;
 const H = 5;
-const SAVE_KEY = "mathcraft_v5_save";
+const SAVE_KEY = "mathcraft_v6_adaptive_save";
 
 const CAMPAIGN = [
   {
     boss: { name: "Cave Troll", emoji: "🪨", hp: 10 },
     tables: [1, 2, 5],
+    unlockAtBosses: 0,
     theme: "Stone Caves",
     intro: "The Cave Troll wakes beneath the mountain..."
   },
   {
     boss: { name: "Lava Dragon", emoji: "🐲", hp: 15 },
-    tables: [3, 4, 6],
+    tables: [1, 2, 3, 4, 5, 6],
+    unlockAtBosses: 1,
     theme: "Lava Fortress",
     intro: "The Lava Dragon rises from the magma..."
   },
   {
     boss: { name: "Ender King", emoji: "👑", hp: 20 },
-    tables: [7, 8, 9],
+    tables: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
+    unlockAtBosses: 2,
     theme: "End Realm",
     intro: "The Ender King opens the final gate..."
   }
@@ -51,10 +54,68 @@ function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
 function key(x, y) { return `${x},${y}`; }
 function adjacent(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1; }
 
-function makeProblem(tables) {
+function makeEmptyStats() {
+  const stats = {};
+  for (let i = 1; i <= 10; i++) {
+    stats[i] = { attempts: 0, correct: 0, wrong: 0, streak: 0, lastSeen: 0 };
+  }
+  return stats;
+}
+
+function chooseAdaptiveTable(availableTables, stats) {
+  const now = Date.now();
+
+  const weighted = availableTables.map((table) => {
+    const s = stats[table] || { attempts: 0, correct: 0, wrong: 0, streak: 0, lastSeen: 0 };
+    const accuracy = s.attempts === 0 ? 0.5 : s.correct / s.attempts;
+    const weaknessBoost = Math.max(0, 1 - accuracy) * 6;
+    const newnessBoost = s.attempts < 3 ? 4 : 0;
+    const wrongBoost = s.wrong * 1.2;
+    const masteryPenalty = s.streak >= 4 && accuracy > 0.85 ? -3 : 0;
+    const recencyBoost = Math.min(3, (now - (s.lastSeen || 0)) / 60000);
+    const weight = Math.max(1, 1 + weaknessBoost + newnessBoost + wrongBoost + recencyBoost + masteryPenalty);
+    return { table, weight };
+  });
+
+  const total = weighted.reduce((sum, item) => sum + item.weight, 0);
+  let roll = Math.random() * total;
+
+  for (const item of weighted) {
+    roll -= item.weight;
+    if (roll <= 0) return item.table;
+  }
+
+  return pick(availableTables);
+}
+
+function makeProblem(availableTables, stats) {
+  const b = chooseAdaptiveTable(availableTables, stats);
   const a = Math.floor(Math.random() * 10) + 1;
-  const b = pick(tables);
-  return { a, b, answer: a * b };
+  return { a, b, answer: a * b, table: b, startedAt: Date.now() };
+}
+
+function updateStats(stats, q, wasCorrect) {
+  const next = { ...stats };
+  const current = next[q.table] || { attempts: 0, correct: 0, wrong: 0, streak: 0, lastSeen: 0 };
+
+  next[q.table] = {
+    attempts: current.attempts + 1,
+    correct: current.correct + (wasCorrect ? 1 : 0),
+    wrong: current.wrong + (wasCorrect ? 0 : 1),
+    streak: wasCorrect ? current.streak + 1 : 0,
+    lastSeen: Date.now()
+  };
+
+  return next;
+}
+
+function tableMastery(stats, table) {
+  const s = stats[table] || { attempts: 0, correct: 0, wrong: 0, streak: 0 };
+  if (s.attempts < 3) return "new";
+  const acc = s.correct / s.attempts;
+  if (s.streak >= 4 && acc >= 0.85) return "strong";
+  if (acc < 0.6 || s.wrong >= 3) return "practice";
+  return "building";
 }
 
 function makeWorld(stage, bossMode = false) {
@@ -109,6 +170,7 @@ function payCost(resources, cost) {
 }
 
 function makeInitialState() {
+  const stats = makeEmptyStats();
   return {
     stage: 0,
     bossMode: false,
@@ -117,7 +179,8 @@ function makeInitialState() {
     inventory: { stone: 0, iron: 0, diamonds: 0, trophies: [] },
     score: 0,
     weaponIndex: 0,
-    campaignComplete: false
+    campaignComplete: false,
+    stats
   };
 }
 
@@ -129,35 +192,44 @@ export default function Home() {
   const [world, setWorld] = useState(() => makeWorld(0, false));
   const [selected, setSelected] = useState(null);
   const [answer, setAnswer] = useState("");
-  const [q, setQ] = useState(() => makeProblem(CAMPAIGN[0].tables));
+  const [stats, setStats] = useState(() => makeEmptyStats());
+  const [q, setQ] = useState(() => makeProblem(CAMPAIGN[0].tables, makeEmptyStats()));
   const [inventory, setInventory] = useState({ stone: 0, iron: 0, diamonds: 0, trophies: [] });
   const [score, setScore] = useState(0);
   const [weaponIndex, setWeaponIndex] = useState(0);
-  const [message, setMessage] = useState("Mine blocks, craft weapons, defeat monsters, and fill the 3-boss gallery.");
+  const [message, setMessage] = useState("Adaptive engine active: the game will gently repeat tables that need practice.");
   const [effect, setEffect] = useState(null);
   const [floating, setFloating] = useState(null);
   const [bossIntro, setBossIntro] = useState(null);
   const [campaignComplete, setCampaignComplete] = useState(false);
+  const [lastFeedback, setLastFeedback] = useState("New table facts are introduced gradually.");
 
+  const availableTables = CAMPAIGN[stage].tables;
   const selectedObj = selected ? world[key(selected.x, selected.y)] : null;
   const weapon = WEAPONS[weaponIndex];
   const monstersLeft = useMemo(() => Object.values(world).filter(o => o.kind === "monster").length, [world]);
+
+  const practiceTables = availableTables.filter(t => tableMastery(stats, t) === "practice");
+  const strongTables = availableTables.filter(t => tableMastery(stats, t) === "strong");
 
   useEffect(() => {
     try {
       const raw = localStorage.getItem(SAVE_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
-        setStage(saved.stage ?? 0);
+        const savedStage = saved.stage ?? 0;
+        const savedStats = saved.stats ?? makeEmptyStats();
+        setStage(savedStage);
         setBossMode(saved.bossMode ?? false);
         setPlayer(saved.player ?? { x: 0, y: 0 });
-        setWorld(saved.world ?? makeWorld(saved.stage ?? 0, saved.bossMode ?? false));
+        setWorld(saved.world ?? makeWorld(savedStage, saved.bossMode ?? false));
         setInventory(saved.inventory ?? { stone: 0, iron: 0, diamonds: 0, trophies: [] });
         setScore(saved.score ?? 0);
         setWeaponIndex(saved.weaponIndex ?? 0);
         setCampaignComplete(saved.campaignComplete ?? false);
-        setQ(makeProblem(CAMPAIGN[saved.stage ?? 0].tables));
-        setMessage("Saved campaign loaded.");
+        setStats(savedStats);
+        setQ(makeProblem(CAMPAIGN[savedStage].tables, savedStats));
+        setMessage("Saved adaptive campaign loaded.");
       }
     } catch (e) {
       console.warn("Could not load save", e);
@@ -167,9 +239,9 @@ export default function Home() {
 
   useEffect(() => {
     if (!loaded) return;
-    const save = { stage, bossMode, player, world, inventory, score, weaponIndex, campaignComplete };
+    const save = { stage, bossMode, player, world, inventory, score, weaponIndex, campaignComplete, stats };
     localStorage.setItem(SAVE_KEY, JSON.stringify(save));
-  }, [loaded, stage, bossMode, player, world, inventory, score, weaponIndex, campaignComplete]);
+  }, [loaded, stage, bossMode, player, world, inventory, score, weaponIndex, campaignComplete, stats]);
 
   useEffect(() => {
     function onKey(e) {
@@ -236,6 +308,10 @@ export default function Home() {
     return moved;
   }
 
+  function nextQuestion(nextStats = stats, nextStage = stage) {
+    setQ(makeProblem(CAMPAIGN[nextStage].tables, nextStats));
+  }
+
   function summonBoss() {
     setBossMode(true);
     setWorld(makeWorld(stage, true));
@@ -259,7 +335,7 @@ export default function Home() {
     setWorld(makeWorld(next, false));
     setPlayer({ x: 0, y: 0 });
     setSelected(null);
-    setQ(makeProblem(CAMPAIGN[next].tables));
+    setQ(makeProblem(CAMPAIGN[next].tables, stats));
     setMessage(`Entering ${CAMPAIGN[next].theme}. New tables unlocked.`);
   }
 
@@ -271,13 +347,21 @@ export default function Home() {
       return;
     }
 
-    if (Number(answer) !== q.answer) {
-      setMessage("🔧 Recipe fizzled. Try again.");
+    const correct = Number(answer) === q.answer;
+    const updatedStats = updateStats(stats, q, correct);
+    setStats(updatedStats);
+
+    if (!correct) {
+      setLastFeedback(`Practising ×${q.table}: the game will bring this table back soon.`);
+      setMessage(`🔧 Recipe fizzled. Correct answer was ${q.answer}. Try the next one.`);
       setEffect(selected);
+      setAnswer("");
+      nextQuestion(updatedStats);
       setTimeout(() => setEffect(null), 350);
       return;
     }
 
+    setLastFeedback(`Nice. ×${q.table} streak is now ${updatedStats[q.table].streak}.`);
     let next = { ...world };
     const p = key(selected.x, selected.y);
 
@@ -325,7 +409,7 @@ export default function Home() {
 
     setAnswer("");
     setSelected(null);
-    setQ(makeProblem(CAMPAIGN[stage].tables));
+    nextQuestion(updatedStats);
 
     const remaining = Object.values(next).filter(o => o.kind === "monster").length;
     if (!bossMode && remaining === 0) {
@@ -364,8 +448,9 @@ export default function Home() {
     setCampaignComplete(false);
     setSelected(null);
     setAnswer("");
-    setQ(makeProblem(CAMPAIGN[0].tables));
-    setMessage("New campaign started.");
+    setStats(fresh.stats);
+    setQ(makeProblem(CAMPAIGN[0].tables, fresh.stats));
+    setMessage("New adaptive campaign started.");
     localStorage.removeItem(SAVE_KEY);
   }
 
@@ -374,8 +459,8 @@ export default function Home() {
       {bossIntro && <div style={styles.overlay}><div style={styles.bossIntro}>⚠️ {bossIntro}</div></div>}
 
       <div style={styles.container}>
-        <h1 style={styles.title}>MathCraft Campaign v5</h1>
-        <p style={styles.subtitle}>Saved progress · weapons · health bars · boss intros · trophy gallery</p>
+        <h1 style={styles.title}>MathCraft Campaign v6</h1>
+        <p style={styles.subtitle}>Adaptive math engine · saved progress · weapons · boss trophies</p>
 
         <div style={styles.grid}>
           <section style={styles.panel}>
@@ -426,7 +511,7 @@ export default function Home() {
 
           <aside style={{ display: "grid", gap: 16 }}>
             <section style={styles.panel}>
-              <h2>🧮 Action</h2>
+              <h2>🧮 Adaptive Action</h2>
               <p style={styles.muted}>
                 {selectedObj
                   ? selectedObj.kind === "monster"
@@ -435,6 +520,7 @@ export default function Home() {
                   : "Select something"}
               </p>
               <div style={styles.question}>{q.a} × {q.b} = ?</div>
+              <p style={styles.muted}>Current focus: ×{q.table}</p>
               <input
                 value={answer}
                 onChange={(e) => setAnswer(e.target.value.replace(/[^0-9]/g, ""))}
@@ -447,6 +533,29 @@ export default function Home() {
             </section>
 
             <section style={styles.panel}>
+              <h2>🧠 Learning Engine</h2>
+              <p style={styles.muted}>{lastFeedback}</p>
+              <p>Needs practice: {practiceTables.length ? practiceTables.map(t => `×${t}`).join(", ") : "none yet"}</p>
+              <p>Strong tables: {strongTables.length ? strongTables.map(t => `×${t}`).join(", ") : "building..."}</p>
+              <div style={styles.tableGrid}>
+                {availableTables.map(t => {
+                  const s = stats[t];
+                  const mastery = tableMastery(stats, t);
+                  return (
+                    <div key={t} style={{
+                      ...styles.masteryCard,
+                      background: mastery === "strong" ? "#14532d" : mastery === "practice" ? "#7f1d1d" : "#1f2937"
+                    }}>
+                      <strong>×{t}</strong>
+                      <small>{s.correct}/{s.attempts}</small>
+                      <small>{mastery}</small>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+
+            <section style={styles.panel}>
               <h2>⚔️ Weapon</h2>
               <p style={{ fontSize: 24 }}>{weapon.emoji} {weapon.name}</p>
               <p>Damage: {weapon.damage}</p>
@@ -454,10 +563,7 @@ export default function Home() {
                 <button
                   key={w.name}
                   onClick={() => craftWeapon(i)}
-                  style={{
-                    ...styles.smallButton,
-                    opacity: i <= weaponIndex ? 0.55 : 1
-                  }}
+                  style={{ ...styles.smallButton, opacity: i <= weaponIndex ? 0.55 : 1 }}
                 >
                   {i <= weaponIndex ? "Unlocked" : "Craft"} {w.emoji} {w.name}
                 </button>
@@ -504,53 +610,17 @@ export default function Home() {
 }
 
 const styles = {
-  main: {
-    minHeight: "100vh",
-    background: "linear-gradient(135deg,#052e16,#111827)",
-    color: "white",
-    fontFamily: "Arial",
-    padding: 20
-  },
+  main: { minHeight: "100vh", background: "linear-gradient(135deg,#052e16,#111827)", color: "white", fontFamily: "Arial", padding: 20 },
   container: { maxWidth: 1200, margin: "0 auto" },
   title: { fontSize: 46, marginBottom: 6 },
   subtitle: { color: "#bbf7d0", fontSize: 20 },
   grid: { display: "grid", gridTemplateColumns: "1.2fr .8fr", gap: 20, marginTop: 20 },
   panel: { background: "#0f172a", border: "2px solid #22c55e", borderRadius: 22, padding: 20 },
   boardHeader: { display: "flex", justifyContent: "space-between", marginBottom: 14 },
-  tile: {
-    position: "relative",
-    width: "100%",
-    aspectRatio: "1/1",
-    borderRadius: 14,
-    border: "2px solid #14532d",
-    background: "linear-gradient(135deg,#166534,#052e16)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 42,
-    cursor: "pointer",
-    transition: "all .2s ease"
-  },
-  hpBarOuter: {
-    position: "absolute",
-    bottom: 6,
-    left: 8,
-    right: 8,
-    height: 7,
-    borderRadius: 8,
-    background: "#111827",
-    overflow: "hidden"
-  },
+  tile: { position: "relative", width: "100%", aspectRatio: "1/1", borderRadius: 14, border: "2px solid #14532d", background: "linear-gradient(135deg,#166534,#052e16)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 42, cursor: "pointer", transition: "all .2s ease" },
+  hpBarOuter: { position: "absolute", bottom: 6, left: 8, right: 8, height: 7, borderRadius: 8, background: "#111827", overflow: "hidden" },
   hpBarInner: { height: "100%", background: "#ef4444", transition: "width .25s ease" },
-  float: {
-    position: "absolute",
-    top: -12,
-    fontSize: 18,
-    fontWeight: "bold",
-    color: "#facc15",
-    textShadow: "0 2px 4px black",
-    animation: "none"
-  },
+  float: { position: "absolute", top: -12, fontSize: 18, fontWeight: "bold", color: "#facc15", textShadow: "0 2px 4px black" },
   muted: { color: "#bbf7d0" },
   question: { fontSize: 58, fontWeight: "bold", margin: "16px 0" },
   input: { width: "100%", boxSizing: "border-box", fontSize: 30, padding: 14, textAlign: "center", borderRadius: 14, border: "none", marginBottom: 12 },
@@ -559,5 +629,7 @@ const styles = {
   resetButton: { width: "100%", marginTop: 12, padding: 10, borderRadius: 12, border: "1px solid #ef4444", background: "transparent", color: "#fecaca", cursor: "pointer" },
   trophy: { padding: 12, borderRadius: 12, marginBottom: 10, border: "1px solid #374151" },
   overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", display: "grid", placeItems: "center", zIndex: 20 },
-  bossIntro: { fontSize: 44, fontWeight: "bold", color: "#facc15", textAlign: "center", padding: 30 }
+  bossIntro: { fontSize: 44, fontWeight: "bold", color: "#facc15", textAlign: "center", padding: 30 },
+  tableGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 12 },
+  masteryCard: { borderRadius: 10, padding: 8, display: "grid", gap: 3, border: "1px solid #374151" }
 };
