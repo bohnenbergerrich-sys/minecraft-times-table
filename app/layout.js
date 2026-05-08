@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "MathCraft Campaign",
-  description: "Minecraft-inspired math dungeon game"
+  title: "MathCraft Campaign v5",
+  description: "Minecraft-inspired multiplication game"
 };
 
 export default function RootLayout({ children }) {
