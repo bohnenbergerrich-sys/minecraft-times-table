@@ -2,70 +2,58 @@
 
 import { useEffect, useMemo, useState } from "react";
 
-const WIDTH = 6;
-const HEIGHT = 5;
-const tables = [1, 2, 5, 10];
+const W = 6;
+const H = 5;
+const TABLES = [1, 2, 5, 10];
 
-const monsters = [
-  { type: "zombie", name: "Zombie", emoji: "🧟", hp: 2 },
-  { type: "spider", name: "Spider", emoji: "🕷️", hp: 2 },
-  { type: "skeleton", name: "Skeleton", emoji: "💀", hp: 3 },
-  { type: "creeper", name: "Creeper", emoji: "🧨", hp: 3 },
+const MONSTERS = [
+  { name: "Zombie", emoji: "🧟", hp: 2 },
+  { name: "Spider", emoji: "🕷️", hp: 2 },
+  { name: "Skeleton", emoji: "💀", hp: 3 },
+  { name: "Creeper", emoji: "🧨", hp: 3 },
 ];
 
-const boss = { type: "boss", name: "Dungeon Boss", emoji: "🐉", hp: 8 };
+const BOSS = { name: "Dungeon Boss", emoji: "🐉", hp: 9 };
 
-const blockTypes = [
+const BLOCKS = [
   { type: "stone", emoji: "🪨", resource: "stone" },
   { type: "iron", emoji: "⛓️", resource: "iron" },
   { type: "diamond", emoji: "💎", resource: "diamonds" },
 ];
 
-function pick(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
+function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
+function pos(x, y) { return `${x},${y}`; }
+function parsePos(k) { return k.split(",").map(Number); }
+function adjacent(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1; }
 
-function key(x, y) {
-  return `${x},${y}`;
-}
-
-function newProblem() {
+function problem() {
   const a = Math.floor(Math.random() * 10) + 1;
-  const b = pick(tables);
+  const b = pick(TABLES);
   return { a, b, answer: a * b };
 }
 
-function adjacent(a, b) {
-  return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1;
-}
-
-function makeWorld(level = 1, bossMode = false) {
+function makeWorld(level, mode) {
   const objects = {};
-  const used = new Set([key(0, 0)]);
+  const used = new Set([pos(0, 0)]);
 
   function place(obj) {
     let x, y;
     do {
-      x = Math.floor(Math.random() * WIDTH);
-      y = Math.floor(Math.random() * HEIGHT);
-    } while (used.has(key(x, y)));
-    used.add(key(x, y));
-    objects[key(x, y)] = { ...obj, id: `${Date.now()}-${Math.random()}` };
+      x = Math.floor(Math.random() * W);
+      y = Math.floor(Math.random() * H);
+    } while (used.has(pos(x, y)));
+    used.add(pos(x, y));
+    objects[pos(x, y)] = { ...obj, id: Math.random().toString(36).slice(2) };
   }
 
-  for (let i = 0; i < 8; i++) place({ kind: "block", ...pick(blockTypes) });
+  for (let i = 0; i < 7; i++) place({ kind: "block", ...pick(BLOCKS) });
 
-  if (bossMode) {
-    place({ kind: "monster", ...boss, currentHp: boss.hp + level, isBoss: true });
+  if (mode === "boss") {
+    place({ kind: "monster", ...BOSS, currentHp: BOSS.hp + level, isBoss: true });
   } else {
-    for (let i = 0; i < 3 + Math.floor(level / 3); i++) {
-      const m = pick(monsters);
-      place({
-        kind: "monster",
-        ...m,
-        currentHp: m.hp + Math.floor(level / 4),
-        isBoss: false,
-      });
+    for (let i = 0; i < 3; i++) {
+      const m = pick(MONSTERS);
+      place({ kind: "monster", ...m, currentHp: m.hp + Math.floor(level / 3), isBoss: false });
     }
   }
 
@@ -73,261 +61,220 @@ function makeWorld(level = 1, bossMode = false) {
 }
 
 export default function Home() {
-  const [player, setPlayer] = useState({ x: 0, y: 0 });
   const [level, setLevel] = useState(1);
-  const [score, setScore] = useState(0);
-  const [turns, setTurns] = useState(0);
-  const [bossMode, setBossMode] = useState(false);
-  const [world, setWorld] = useState(() => makeWorld(1, false));
+  const [mode, setMode] = useState("normal");
+  const [player, setPlayer] = useState({ x: 0, y: 0 });
+  const [world, setWorld] = useState(() => makeWorld(1, "normal"));
   const [selected, setSelected] = useState(null);
-  const [problem, setProblem] = useState(() => newProblem());
+  const [q, setQ] = useState(() => problem());
   const [answer, setAnswer] = useState("");
-  const [message, setMessage] = useState(
-    "Use the arrow keys to run around. Mine blocks. Fight monsters. Every action needs a 1x1 recipe."
-  );
-  const [inventory, setInventory] = useState({
-    stone: 0,
-    iron: 0,
-    diamonds: 0,
-    monsters: 0,
-    bosses: 0,
-    scares: 0,
-  });
+  const [msg, setMsg] = useState("Use arrow keys. Bump into blocks or monsters, solve the recipe, then mine or attack.");
+  const [inv, setInv] = useState({ stone: 0, iron: 0, diamonds: 0, monsters: 0, bosses: 0, scares: 0 });
+  const [score, setScore] = useState(0);
+  const [turn, setTurn] = useState(0);
   const [effect, setEffect] = useState(null);
 
-  const selectedObject = selected ? world[key(selected.x, selected.y)] : null;
+  const selectedObj = selected ? world[pos(selected.x, selected.y)] : null;
+  const damage = 1 + Math.floor(inv.iron / 2) + inv.diamonds;
+  const monstersLeft = useMemo(() => Object.values(world).filter(o => o.kind === "monster").length, [world]);
 
-  const remainingMonsters = useMemo(
-    () => Object.values(world).filter((o) => o.kind === "monster").length,
-    [world]
-  );
-
-  const damage = 1 + Math.floor(inventory.iron / 2) + inventory.diamonds;
-
-  function canMoveTo(x, y) {
-    if (x < 0 || x >= WIDTH || y < 0 || y >= HEIGHT) return false;
-    return !world[key(x, y)];
-  }
-
-  function move(dx, dy) {
+  function movePlayer(dx, dy) {
     const nx = player.x + dx;
     const ny = player.y + dy;
+    if (nx < 0 || nx >= W || ny < 0 || ny >= H) return;
 
-    if (canMoveTo(nx, ny)) {
-      setPlayer({ x: nx, y: ny });
-      setSelected(null);
-      setMessage("You moved through the dungeon. Find something to mine or fight.");
-    } else if (nx >= 0 && nx < WIDTH && ny >= 0 && ny < HEIGHT) {
+    const obj = world[pos(nx, ny)];
+    if (obj) {
       setSelected({ x: nx, y: ny });
-      const obj = world[key(nx, ny)];
-      if (obj?.kind === "block") setMessage(`You bumped into ${obj.emoji}. Solve the recipe to mine it.`);
-      if (obj?.kind === "monster") setMessage(`${obj.emoji} ${obj.name} blocks your way. Solve the recipe to attack!`);
+      setMsg(obj.kind === "monster" ? `${obj.emoji} ${obj.name} blocks your way. Solve to attack!` : `${obj.emoji} ${obj.resource} block. Solve to mine!`);
+      return;
     }
+
+    setPlayer({ x: nx, y: ny });
+    setSelected(null);
+    setMsg("Moved. Find a block or monster.");
   }
 
   useEffect(() => {
-    function onKeyDown(e) {
+    function onKey(e) {
       if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) e.preventDefault();
-      if (e.key === "ArrowUp") move(0, -1);
-      if (e.key === "ArrowDown") move(0, 1);
-      if (e.key === "ArrowLeft") move(-1, 0);
-      if (e.key === "ArrowRight") move(1, 0);
+      if (e.key === "ArrowUp") movePlayer(0, -1);
+      if (e.key === "ArrowDown") movePlayer(0, 1);
+      if (e.key === "ArrowLeft") movePlayer(-1, 0);
+      if (e.key === "ArrowRight") movePlayer(1, 0);
     }
-
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
   });
 
-  function selectTile(x, y) {
-    const obj = world[key(x, y)];
-
+  function clickTile(x, y) {
+    const obj = world[pos(x, y)];
     if (!obj) {
       if (adjacent(player, { x, y })) {
         setPlayer({ x, y });
         setSelected(null);
-        setMessage("Moved one step.");
-      } else {
-        setMessage("Use arrow keys, or click an empty square next to you.");
-      }
+        setMsg("Moved one step.");
+      } else setMsg("Click an adjacent empty square or use arrow keys.");
       return;
     }
-
     setSelected({ x, y });
-    if (obj.kind === "block") setMessage(`${obj.emoji} Mine this block by solving ${problem.a} × ${problem.b}.`);
-    if (obj.kind === "monster") setMessage(`${obj.emoji} Attack the ${obj.name} by solving ${problem.a} × ${problem.b}.`);
+    setMsg(obj.kind === "monster" ? `${obj.emoji} Attack ${obj.name}.` : `${obj.emoji} Mine ${obj.resource}.`);
   }
 
-  function advanceTurn(currentWorld = world) {
-    const nextTurn = turns + 1;
-    setTurns(nextTurn);
+  function moveMonsters(nextWorld) {
+    const moved = { ...nextWorld };
+    let scared = false;
 
-    if (nextTurn % 2 !== 0) return;
-
-    const occupied = new Set([key(player.x, player.y)]);
-    Object.entries(currentWorld).forEach(([pos, obj]) => {
-      if (obj.kind !== "monster") occupied.add(pos);
-    });
-
-    const movedWorld = { ...currentWorld };
-    let scareHappened = false;
-
-    Object.entries(currentWorld).forEach(([pos, obj]) => {
-      if (obj.kind !== "monster") return;
-
-      const [x, y] = pos.split(",").map(Number);
+    for (const [k, obj] of Object.entries(nextWorld)) {
+      if (obj.kind !== "monster" || !moved[k]) continue;
+      const [x, y] = parsePos(k);
 
       if (adjacent({ x, y }, player)) {
-        scareHappened = true;
-        return;
+        scared = true;
+        continue;
       }
 
       const options = [
         { x: x + Math.sign(player.x - x), y },
         { x, y: y + Math.sign(player.y - y) },
-      ].filter((p) => p.x >= 0 && p.x < WIDTH && p.y >= 0 && p.y < HEIGHT);
+      ].filter(p => p.x >= 0 && p.x < W && p.y >= 0 && p.y < H);
 
-      const moveTo = options.find((p) => !occupied.has(key(p.x, p.y)) && !movedWorld[key(p.x, p.y)]);
-
-      if (moveTo) {
-        delete movedWorld[pos];
-        movedWorld[key(moveTo.x, moveTo.y)] = obj;
-        occupied.add(key(moveTo.x, moveTo.y));
+      const dest = options.find(p => !moved[pos(p.x, p.y)] && !(p.x === player.x && p.y === player.y));
+      if (dest) {
+        delete moved[k];
+        moved[pos(dest.x, dest.y)] = obj;
       }
-    });
-
-    if (scareHappened) {
-      setInventory((inv) => ({ ...inv, scares: inv.scares + 1 }));
-      setPlayer({ x: 0, y: 0 });
-      setSelected(null);
-      setMessage("😱 A monster reached you! You escaped back to the dungeon entrance.");
-      setEffect({ type: "scare", at: player });
-      setTimeout(() => setEffect(null), 450);
     }
 
-    setWorld(movedWorld);
+    if (scared) {
+      setPlayer({ x: 0, y: 0 });
+      setInv(v => ({ ...v, scares: v.scares + 1 }));
+      setMsg("😱 A monster reached you! You ran back to the entrance.");
+    } else {
+      setMsg("👹 The monsters moved closer...");
+    }
+
+    return moved;
   }
 
-  function solveAction() {
-    if (!selectedObject) {
-      setMessage("Choose a block or monster first.");
+  function checkForBoss(nextWorld) {
+    const left = Object.values(nextWorld).filter(o => o.kind === "monster").length;
+    if (mode === "normal" && left === 0) {
+      setMode("boss");
+      setPlayer({ x: 0, y: 0 });
+      setWorld(makeWorld(level, "boss"));
+      setSelected(null);
+      setQ(problem());
+      setMsg("🐉 BOSS BATTLE! The Dungeon Boss appeared automatically.");
+      return true;
+    }
+    return false;
+  }
+
+  function solve() {
+    if (!selectedObj) {
+      setMsg("Select a block or monster first.");
       return;
     }
 
-    if (Number(answer) !== problem.answer) {
-      setMessage("🔧 Not quite. The recipe fizzled — try again.");
-      setEffect({ type: "shake", at: selected });
-      setTimeout(() => setEffect(null), 450);
+    if (Number(answer) !== q.answer) {
+      setMsg("🔧 Recipe fizzled. Try again.");
+      setEffect(selected);
+      setTimeout(() => setEffect(null), 400);
       return;
     }
 
-    const tileKey = key(selected.x, selected.y);
-    let nextWorld = { ...world };
+    let next = { ...world };
+    const k = pos(selected.x, selected.y);
 
-    if (selectedObject.kind === "block") {
-      delete nextWorld[tileKey];
-      setInventory((inv) => ({
-        ...inv,
-        [selectedObject.resource]: inv[selectedObject.resource] + 1,
-      }));
-      setScore((s) => s + 1);
-      setMessage(`💥 You smashed ${selectedObject.emoji} and collected ${selectedObject.resource}!`);
-      setEffect({ type: "explode", at: selected });
+    if (selectedObj.kind === "block") {
+      delete next[k];
+      setInv(v => ({ ...v, [selectedObj.resource]: v[selectedObj.resource] + 1 }));
+      setScore(s => s + 1);
     }
 
-    if (selectedObject.kind === "monster") {
-      const newHp = selectedObject.currentHp - damage;
+    if (selectedObj.kind === "monster") {
+      const hp = selectedObj.currentHp - damage;
+      if (hp <= 0) {
+        delete next[k];
 
-      if (newHp <= 0) {
-        delete nextWorld[tileKey];
-
-        if (selectedObject.isBoss) {
-          setInventory((inv) => ({ ...inv, bosses: inv.bosses + 1 }));
-          setScore((s) => s + 10);
-          setBossMode(false);
-          setMessage(`🏆 You defeated the ${selectedObject.name}! The dungeon is clear. Open the next level!`);
-        } else {
-          setInventory((inv) => ({ ...inv, monsters: inv.monsters + 1 }));
-          setScore((s) => s + 2);
-          setMessage(`⚔️ You defeated the ${selectedObject.name}!`);
+        if (selectedObj.isBoss) {
+          setInv(v => ({ ...v, bosses: v.bosses + 1 }));
+          setScore(s => s + 10);
+          const newLevel = level + 1;
+          setLevel(newLevel);
+          setMode("normal");
+          setPlayer({ x: 0, y: 0 });
+          setWorld(makeWorld(newLevel, "normal"));
+          setSelected(null);
+          setQ(problem());
+          setAnswer("");
+          setMsg(`🏆 Boss defeated! Level ${newLevel} begins.`);
+          return;
         }
 
-        setEffect({ type: "boom", at: selected });
+        setInv(v => ({ ...v, monsters: v.monsters + 1 }));
+        setScore(s => s + 3);
       } else {
-        nextWorld[tileKey] = { ...selectedObject, currentHp: newHp };
-        setScore((s) => s + 1);
-        setMessage(`⚔️ Hit! ${selectedObject.name} has ${newHp} hearts left.`);
-        setEffect({ type: "hit", at: selected });
+        next[k] = { ...selectedObj, currentHp: hp };
+        setScore(s => s + 1);
       }
     }
 
-    setWorld(nextWorld);
     setAnswer("");
     setSelected(null);
-    setProblem(newProblem());
-    advanceTurn(nextWorld);
-    setTimeout(() => setEffect(null), 500);
+    setQ(problem());
+    setTurn(t => t + 1);
+
+    if (checkForBoss(next)) return;
+    setWorld(moveMonsters(next));
   }
 
-  function startBossBattle() {
-    setBossMode(true);
+  function resetDungeon() {
     setPlayer({ x: 0, y: 0 });
-    setWorld(makeWorld(level, true));
+    setWorld(makeWorld(level, mode));
     setSelected(null);
-    setProblem(newProblem());
-    setMessage("🐉 Boss battle! Mine resources, then defeat the Dungeon Boss.");
-  }
-
-  function nextLevel() {
-    const next = level + 1;
-    setLevel(next);
-    setBossMode(false);
-    setPlayer({ x: 0, y: 0 });
-    setWorld(makeWorld(next, false));
-    setSelected(null);
-    setProblem(newProblem());
-    setMessage(`Level ${next}! New dungeon generated. Monsters now move every two correct actions.`);
+    setQ(problem());
+    setMsg("Dungeon reset.");
   }
 
   return (
     <main style={{ minHeight: "100vh", background: "linear-gradient(135deg,#052e16,#064e3b,#111827)", color: "white", fontFamily: "Arial, sans-serif", padding: 22 }}>
       <div style={{ maxWidth: 1120, margin: "0 auto" }}>
         <h1 style={{ fontSize: 44, margin: "0 0 8px" }}>MathCraft Dungeon</h1>
-        <p style={{ fontSize: 19, color: "#bbf7d0" }}>
-          Run with arrow keys. Mine blocks. Fight moving monsters. Defeat the boss.
-        </p>
+        <p style={{ fontSize: 19, color: "#bbf7d0" }}>Now with visible moving monsters and automatic boss battles.</p>
 
         <div style={{ display: "grid", gridTemplateColumns: "1.25fr .75fr", gap: 20, alignItems: "start", marginTop: 22 }}>
-          <section style={{ background: "#0f172a", border: "2px solid #22c55e", borderRadius: 24, padding: 18 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <h2 style={{ margin: 0 }}>{bossMode ? "🐉 Boss Dungeon" : "🧭 Dungeon Board"}</h2>
-              <strong>Level {level}</strong>
+          <section style={panel}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+              <h2 style={{ margin: 0 }}>{mode === "boss" ? "🐉 Boss Dungeon" : "🧭 Dungeon Board"}</h2>
+              <strong>Level {level} · Turn {turn}</strong>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${WIDTH}, 1fr)`, gap: 10 }}>
-              {Array.from({ length: WIDTH * HEIGHT }).map((_, i) => {
-                const x = i % WIDTH;
-                const y = Math.floor(i / WIDTH);
-                const obj = world[key(x, y)];
+            <div style={{ display: "grid", gridTemplateColumns: `repeat(${W}, 1fr)`, gap: 10 }}>
+              {Array.from({ length: W * H }).map((_, i) => {
+                const x = i % W;
+                const y = Math.floor(i / W);
+                const obj = world[pos(x, y)];
                 const isPlayer = player.x === x && player.y === y;
                 const isSelected = selected && selected.x === x && selected.y === y;
-                const hasEffect = effect && effect.at?.x === x && effect.at?.y === y;
+                const hasEffect = effect && effect.x === x && effect.y === y;
 
                 return (
                   <div
                     key={i}
-                    onClick={() => selectTile(x, y)}
+                    onClick={() => clickTile(x, y)}
                     style={{
-                      ...tileStyle,
+                      ...tile,
                       outline: isSelected ? "4px solid #facc15" : "none",
-                      transform: hasEffect ? "scale(1.1) rotate(-2deg)" : "scale(1)",
-                      transition: "transform .18s ease, outline .18s ease",
+                      transform: hasEffect ? "scale(1.12) rotate(-3deg)" : "scale(1)",
                       background: obj?.kind === "block"
                         ? "linear-gradient(135deg,#6b7280,#374151)"
                         : obj?.kind === "monster"
                         ? obj.isBoss
-                          ? "linear-gradient(135deg,#7c2d12,#111827)"
+                          ? "linear-gradient(135deg,#991b1b,#431407)"
                           : "linear-gradient(135deg,#7f1d1d,#111827)"
-                        : tileStyle.background,
+                        : tile.background,
                     }}
                   >
                     {isPlayer ? "🧍" : obj ? obj.emoji : ""}
@@ -335,51 +282,33 @@ export default function Home() {
                 );
               })}
             </div>
-
-            <p style={{ color: "#bbf7d0", marginTop: 14 }}>
-              Monsters move every two correct actions. If they reach you, you escape back to the entrance.
-            </p>
           </section>
 
           <aside style={{ display: "grid", gap: 16 }}>
-            <section style={panelStyle}>
+            <section style={panel}>
               <h2 style={{ marginTop: 0 }}>🧮 Action Recipe</h2>
-              <p style={{ color: "#bbf7d0" }}>
-                {selectedObject
-                  ? selectedObject.kind === "monster"
-                    ? `Attack ${selectedObject.name}${selectedObject.currentHp ? ` — HP ${selectedObject.currentHp}` : ""}`
-                    : `Mine ${selectedObject.resource}`
-                  : "Select a block or monster"}
-              </p>
-              <div style={{ fontSize: 54, fontWeight: "bold", margin: "14px 0" }}>{problem.a} × {problem.b} = ?</div>
-              <input value={answer} onChange={(e) => setAnswer(e.target.value.replace(/[^0-9]/g, ""))} onKeyDown={(e) => e.key === "Enter" && solveAction()} placeholder="Answer" style={inputStyle} />
-              <button onClick={solveAction} style={buttonStyle}>{selectedObject?.kind === "monster" ? "Attack!" : "Mine!"}</button>
+              <p style={{ color: "#bbf7d0" }}>{selectedObj ? selectedObj.kind === "monster" ? `Attack ${selectedObj.name} — HP ${selectedObj.currentHp}` : `Mine ${selectedObj.resource}` : "Select a block or monster"}</p>
+              <div style={{ fontSize: 54, fontWeight: "bold", margin: "14px 0" }}>{q.a} × {q.b} = ?</div>
+              <input value={answer} onChange={e => setAnswer(e.target.value.replace(/[^0-9]/g, ""))} onKeyDown={e => e.key === "Enter" && solve()} placeholder="Answer" style={input} />
+              <button onClick={solve} style={button}>{selectedObj?.kind === "monster" ? "Attack!" : "Mine!"}</button>
             </section>
 
-            <section style={panelStyle}>
+            <section style={panel}>
               <h2 style={{ marginTop: 0 }}>🎒 Inventory</h2>
-              <p>🪨 Stone: {inventory.stone}</p>
-              <p>⛓️ Iron: {inventory.iron}</p>
-              <p>💎 Diamonds: {inventory.diamonds}</p>
-              <p>👾 Monsters defeated: {inventory.monsters}</p>
-              <p>🐉 Bosses defeated: {inventory.bosses}</p>
-              <p>😱 Escapes: {inventory.scares}</p>
+              <p>🪨 Stone: {inv.stone}</p>
+              <p>⛓️ Iron: {inv.iron}</p>
+              <p>💎 Diamonds: {inv.diamonds}</p>
+              <p>👾 Monsters defeated: {inv.monsters}</p>
+              <p>🐉 Bosses defeated: {inv.bosses}</p>
+              <p>😱 Escapes: {inv.scares}</p>
               <p>⭐ Score: {score}</p>
               <p>⚔️ Damage: {damage}</p>
-              <p>⏱️ Turn: {turns}</p>
+              <p>👹 Monsters left: {monstersLeft}</p>
             </section>
 
-            <section style={panelStyle}>
-              <p style={{ fontSize: 18 }}>{message}</p>
-              {!bossMode && inventory.monsters > 0 && inventory.monsters % 3 === 0 && (
-                <button onClick={startBossBattle} style={orangeButtonStyle}>Open boss battle</button>
-              )}
-              {remainingMonsters === 0 && bossMode && (
-                <button onClick={nextLevel} style={buttonStyle}>Open next dungeon</button>
-              )}
-              {remainingMonsters === 0 && !bossMode && (
-                <button onClick={nextLevel} style={buttonStyle}>Skip to next dungeon</button>
-              )}
+            <section style={panel}>
+              <p style={{ fontSize: 18 }}>{msg}</p>
+              <button onClick={resetDungeon} style={smallButton}>Reset current dungeon</button>
             </section>
           </aside>
         </div>
@@ -388,7 +317,15 @@ export default function Home() {
   );
 }
 
-const tileStyle = {
+const panel = {
+  background: "#0f172a",
+  border: "2px solid #22c55e",
+  borderRadius: 22,
+  padding: 20,
+  boxShadow: "0 16px 40px rgba(0,0,0,.25)",
+};
+
+const tile = {
   width: "100%",
   aspectRatio: "1 / 1",
   borderRadius: 14,
@@ -402,17 +339,10 @@ const tileStyle = {
   cursor: "pointer",
   boxShadow: "inset 0 0 18px rgba(0,0,0,.35)",
   userSelect: "none",
+  transition: "all .2s ease",
 };
 
-const panelStyle = {
-  background: "#0f172a",
-  border: "2px solid #22c55e",
-  borderRadius: 22,
-  padding: 20,
-  boxShadow: "0 16px 40px rgba(0,0,0,.25)",
-};
-
-const inputStyle = {
+const input = {
   width: "100%",
   boxSizing: "border-box",
   fontSize: 30,
@@ -423,7 +353,7 @@ const inputStyle = {
   marginBottom: 12,
 };
 
-const buttonStyle = {
+const button = {
   width: "100%",
   fontSize: 22,
   padding: "14px 18px",
@@ -435,9 +365,11 @@ const buttonStyle = {
   cursor: "pointer",
 };
 
-const orangeButtonStyle = {
-  ...buttonStyle,
-  background: "#f97316",
-  color: "white",
-  marginBottom: 12,
+const smallButton = {
+  ...button,
+  fontSize: 16,
+  marginTop: 12,
+  background: "transparent",
+  color: "#bbf7d0",
+  border: "1px solid #22c55e",
 };
