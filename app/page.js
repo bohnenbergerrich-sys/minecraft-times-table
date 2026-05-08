@@ -1,635 +1,466 @@
 "use client";
-
 import { useEffect, useMemo, useState } from "react";
 
-const W = 6;
-const H = 5;
-const SAVE_KEY = "mathcraft_v6_adaptive_save";
+const W=6,H=5,SAVE_KEY="mathcraft_v7_save";
 
-const CAMPAIGN = [
-  {
-    boss: { name: "Cave Troll", emoji: "🪨", hp: 10 },
-    tables: [1, 2, 5],
-    unlockAtBosses: 0,
-    theme: "Stone Caves",
-    intro: "The Cave Troll wakes beneath the mountain..."
-  },
-  {
-    boss: { name: "Lava Dragon", emoji: "🐲", hp: 15 },
-    tables: [1, 2, 3, 4, 5, 6],
-    unlockAtBosses: 1,
-    theme: "Lava Fortress",
-    intro: "The Lava Dragon rises from the magma..."
-  },
-  {
-    boss: { name: "Ender King", emoji: "👑", hp: 20 },
-    tables: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10],
-    unlockAtBosses: 2,
-    theme: "End Realm",
-    intro: "The Ender King opens the final gate..."
-  }
+const CAMPAIGN=[
+ {boss:{name:"Cave Troll",emoji:"🪨",hp:10},tables:[1,2,5],theme:"Stone Caves"},
+ {boss:{name:"Lava Dragon",emoji:"🐲",hp:15},tables:[1,2,3,4,5,6],theme:"Lava Fortress"},
+ {boss:{name:"Ender King",emoji:"👑",hp:20},tables:[1,2,3,4,5,6,7,8,9,10],theme:"End Realm"},
 ];
 
-const MONSTERS = [
-  { name: "Zombie", emoji: "🧟", hp: 3 },
-  { name: "Spider", emoji: "🕷️", hp: 3 },
-  { name: "Skeleton", emoji: "💀", hp: 4 },
-  { name: "Creeper", emoji: "🧨", hp: 4 },
+const MONSTERS=[
+ {name:"Zombie",emoji:"🧟",hp:3},
+ {name:"Spider",emoji:"🕷️",hp:3},
+ {name:"Skeleton",emoji:"💀",hp:4},
+ {name:"Creeper",emoji:"🧨",hp:4},
 ];
 
-const BLOCKS = [
-  { type: "stone", emoji: "🪨", resource: "stone" },
-  { type: "iron", emoji: "⛓️", resource: "iron" },
-  { type: "diamond", emoji: "💎", resource: "diamonds" },
+const BLOCKS=[
+ {type:"stone",emoji:"🪨",resource:"stone"},
+ {type:"iron",emoji:"⛓️",resource:"iron"},
+ {type:"diamond",emoji:"💎",resource:"diamonds"},
 ];
 
-const WEAPONS = [
-  { name: "Wooden Sword", emoji: "🪵⚔️", damage: 1, cost: {} },
-  { name: "Stone Sword", emoji: "🪨⚔️", damage: 2, cost: { stone: 4 } },
-  { name: "Iron Sword", emoji: "⚔️", damage: 4, cost: { iron: 3, stone: 2 } },
-  { name: "Diamond Sword", emoji: "💎⚔️", damage: 7, cost: { diamonds: 2, iron: 2 } },
+const WEAPONS=[
+ {name:"Wooden Sword",emoji:"🪵⚔️",damage:1,cost:{}},
+ {name:"Stone Sword",emoji:"🪨⚔️",damage:2,cost:{stone:4}},
+ {name:"Iron Sword",emoji:"⚔️",damage:4,cost:{iron:3,stone:2}},
+ {name:"Diamond Sword",emoji:"💎⚔️",damage:7,cost:{diamonds:2,iron:2}},
 ];
 
-function pick(a) { return a[Math.floor(Math.random() * a.length)]; }
-function key(x, y) { return `${x},${y}`; }
-function adjacent(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y) === 1; }
+const pick=a=>a[Math.floor(Math.random()*a.length)];
+const key=(x,y)=>`${x},${y}`;
 
-function makeEmptyStats() {
-  const stats = {};
-  for (let i = 1; i <= 10; i++) {
-    stats[i] = { attempts: 0, correct: 0, wrong: 0, streak: 0, lastSeen: 0 };
-  }
-  return stats;
+function emptyStats(){
+ const s={};
+ for(let i=1;i<=10;i++)s[i]={attempts:0,correct:0,wrong:0,streak:0};
+ return s;
 }
 
-function chooseAdaptiveTable(availableTables, stats) {
-  const now = Date.now();
-
-  const weighted = availableTables.map((table) => {
-    const s = stats[table] || { attempts: 0, correct: 0, wrong: 0, streak: 0, lastSeen: 0 };
-    const accuracy = s.attempts === 0 ? 0.5 : s.correct / s.attempts;
-    const weaknessBoost = Math.max(0, 1 - accuracy) * 6;
-    const newnessBoost = s.attempts < 3 ? 4 : 0;
-    const wrongBoost = s.wrong * 1.2;
-    const masteryPenalty = s.streak >= 4 && accuracy > 0.85 ? -3 : 0;
-    const recencyBoost = Math.min(3, (now - (s.lastSeen || 0)) / 60000);
-    const weight = Math.max(1, 1 + weaknessBoost + newnessBoost + wrongBoost + recencyBoost + masteryPenalty);
-    return { table, weight };
-  });
-
-  const total = weighted.reduce((sum, item) => sum + item.weight, 0);
-  let roll = Math.random() * total;
-
-  for (const item of weighted) {
-    roll -= item.weight;
-    if (roll <= 0) return item.table;
-  }
-
-  return pick(availableTables);
+function chooseTable(tables,stats){
+ const weighted=tables.map(t=>{
+  const s=stats[t];
+  const acc=s.attempts? s.correct/s.attempts : .5;
+  let w=1;
+  if(acc<0.7)w+=5;
+  if(s.wrong>2)w+=3;
+  if(s.streak>=4&&acc>.85)w-=2;
+  return {t,w:Math.max(1,w)};
+ });
+ const total=weighted.reduce((a,b)=>a+b.w,0);
+ let r=Math.random()*total;
+ for(const item of weighted){
+  r-=item.w;
+  if(r<=0)return item.t;
+ }
+ return pick(tables);
 }
 
-function makeProblem(availableTables, stats) {
-  const b = chooseAdaptiveTable(availableTables, stats);
-  const a = Math.floor(Math.random() * 10) + 1;
-  return { a, b, answer: a * b, table: b, startedAt: Date.now() };
+function makeProblem(tables,stats){
+ const b=chooseTable(tables,stats);
+ const a=Math.floor(Math.random()*10)+1;
+ return {a,b,answer:a*b,table:b};
 }
 
-function updateStats(stats, q, wasCorrect) {
-  const next = { ...stats };
-  const current = next[q.table] || { attempts: 0, correct: 0, wrong: 0, streak: 0, lastSeen: 0 };
-
-  next[q.table] = {
-    attempts: current.attempts + 1,
-    correct: current.correct + (wasCorrect ? 1 : 0),
-    wrong: current.wrong + (wasCorrect ? 0 : 1),
-    streak: wasCorrect ? current.streak + 1 : 0,
-    lastSeen: Date.now()
-  };
-
-  return next;
+function updateStats(stats,q,correct){
+ return {
+  ...stats,
+  [q.table]:{
+   attempts:stats[q.table].attempts+1,
+   correct:stats[q.table].correct+(correct?1:0),
+   wrong:stats[q.table].wrong+(correct?0:1),
+   streak:correct?stats[q.table].streak+1:0
+  }
+ }
 }
 
-function tableMastery(stats, table) {
-  const s = stats[table] || { attempts: 0, correct: 0, wrong: 0, streak: 0 };
-  if (s.attempts < 3) return "new";
-  const acc = s.correct / s.attempts;
-  if (s.streak >= 4 && acc >= 0.85) return "strong";
-  if (acc < 0.6 || s.wrong >= 3) return "practice";
-  return "building";
+function mastery(stats,t){
+ const s=stats[t];
+ if(s.attempts<3)return "new";
+ const acc=s.correct/s.attempts;
+ if(acc>.85&&s.streak>=4)return "strong";
+ if(acc<.6)return "practice";
+ return "building";
 }
 
-function makeWorld(stage, bossMode = false) {
-  const world = {};
-  const used = new Set(["0,0"]);
-
-  function place(obj) {
-    let x, y;
-    do {
-      x = Math.floor(Math.random() * W);
-      y = Math.floor(Math.random() * H);
-    } while (used.has(key(x, y)));
-
-    used.add(key(x, y));
-    world[key(x, y)] = { ...obj, id: Math.random().toString(36).slice(2) };
+function world(stage,boss=false){
+ const w={},used=new Set(["0,0"]);
+ function place(o){
+  let x,y;
+  do{
+   x=Math.floor(Math.random()*W);
+   y=Math.floor(Math.random()*H);
+  }while(used.has(key(x,y)));
+  used.add(key(x,y));
+  w[key(x,y)]={...o};
+ }
+ for(let i=0;i<7;i++)place({kind:"block",...pick(BLOCKS)});
+ if(boss){
+  const b=CAMPAIGN[stage].boss;
+  place({kind:"monster",...b,currentHp:b.hp,maxHp:b.hp,isBoss:true});
+ } else {
+  for(let i=0;i<3;i++){
+   const m=pick(MONSTERS);
+   place({kind:"monster",...m,currentHp:m.hp,maxHp:m.hp});
   }
-
-  for (let i = 0; i < 7; i++) place({ kind: "block", ...pick(BLOCKS) });
-
-  if (bossMode) {
-    place({
-      kind: "monster",
-      ...CAMPAIGN[stage].boss,
-      currentHp: CAMPAIGN[stage].boss.hp,
-      maxHp: CAMPAIGN[stage].boss.hp,
-      isBoss: true
-    });
-  } else {
-    for (let i = 0; i < 3; i++) {
-      const m = pick(MONSTERS);
-      place({
-        kind: "monster",
-        ...m,
-        currentHp: m.hp + Math.floor(stage / 2),
-        maxHp: m.hp + Math.floor(stage / 2),
-        isBoss: false
-      });
-    }
-  }
-
-  return world;
+ }
+ return w;
 }
 
-function canAfford(resources, cost) {
-  return Object.entries(cost).every(([r, amount]) => resources[r] >= amount);
-}
+export default function Home(){
+ const [stage,setStage]=useState(0);
+ const [bossMode,setBossMode]=useState(false);
+ const [worldState,setWorldState]=useState(()=>world(0,false));
+ const [player,setPlayer]=useState({x:0,y:0});
+ const [selected,setSelected]=useState(null);
+ const [stats,setStats]=useState(()=>emptyStats());
+ const [q,setQ]=useState(()=>makeProblem(CAMPAIGN[0].tables,emptyStats()));
+ const [answer,setAnswer]=useState("");
+ const [inventory,setInventory]=useState({stone:0,iron:0,diamonds:0,trophies:[]});
+ const [weaponIndex,setWeaponIndex]=useState(0);
+ const [score,setScore]=useState(0);
+ const [message,setMessage]=useState("Wrong answers let monsters move closer!");
+ const [lives,setLives]=useState(3);
+ const [campaignComplete,setCampaignComplete]=useState(false);
 
-function payCost(resources, cost) {
-  const next = { ...resources };
-  Object.entries(cost).forEach(([r, amount]) => { next[r] -= amount; });
-  return next;
-}
+ const weapon=WEAPONS[weaponIndex];
+ const selectedObj=selected?worldState[key(selected.x,selected.y)]:null;
+ const tables=CAMPAIGN[stage].tables;
 
-function makeInitialState() {
-  const stats = makeEmptyStats();
-  return {
-    stage: 0,
-    bossMode: false,
-    player: { x: 0, y: 0 },
-    world: makeWorld(0, false),
-    inventory: { stone: 0, iron: 0, diamonds: 0, trophies: [] },
-    score: 0,
-    weaponIndex: 0,
-    campaignComplete: false,
-    stats
-  };
-}
+ useEffect(()=>{
+  try{
+   const raw=localStorage.getItem(SAVE_KEY);
+   if(raw){
+    const s=JSON.parse(raw);
+    setStage(s.stage||0);
+    setBossMode(s.bossMode||false);
+    setWorldState(s.worldState||world(0,false));
+    setPlayer(s.player||{x:0,y:0});
+    setStats(s.stats||emptyStats());
+    setInventory(s.inventory||{stone:0,iron:0,diamonds:0,trophies:[]});
+    setWeaponIndex(s.weaponIndex||0);
+    setScore(s.score||0);
+    setLives(s.lives||3);
+    setCampaignComplete(s.campaignComplete||false);
+   }
+  }catch{}
+ },[]);
 
-export default function Home() {
-  const [loaded, setLoaded] = useState(false);
-  const [stage, setStage] = useState(0);
-  const [bossMode, setBossMode] = useState(false);
-  const [player, setPlayer] = useState({ x: 0, y: 0 });
-  const [world, setWorld] = useState(() => makeWorld(0, false));
-  const [selected, setSelected] = useState(null);
-  const [answer, setAnswer] = useState("");
-  const [stats, setStats] = useState(() => makeEmptyStats());
-  const [q, setQ] = useState(() => makeProblem(CAMPAIGN[0].tables, makeEmptyStats()));
-  const [inventory, setInventory] = useState({ stone: 0, iron: 0, diamonds: 0, trophies: [] });
-  const [score, setScore] = useState(0);
-  const [weaponIndex, setWeaponIndex] = useState(0);
-  const [message, setMessage] = useState("Adaptive engine active: the game will gently repeat tables that need practice.");
-  const [effect, setEffect] = useState(null);
-  const [floating, setFloating] = useState(null);
-  const [bossIntro, setBossIntro] = useState(null);
-  const [campaignComplete, setCampaignComplete] = useState(false);
-  const [lastFeedback, setLastFeedback] = useState("New table facts are introduced gradually.");
+ useEffect(()=>{
+  localStorage.setItem(SAVE_KEY,JSON.stringify({
+   stage,bossMode,worldState,player,stats,inventory,weaponIndex,score,lives,campaignComplete
+  }));
+ },[stage,bossMode,worldState,player,stats,inventory,weaponIndex,score,lives,campaignComplete]);
 
-  const availableTables = CAMPAIGN[stage].tables;
-  const selectedObj = selected ? world[key(selected.x, selected.y)] : null;
-  const weapon = WEAPONS[weaponIndex];
-  const monstersLeft = useMemo(() => Object.values(world).filter(o => o.kind === "monster").length, [world]);
-
-  const practiceTables = availableTables.filter(t => tableMastery(stats, t) === "practice");
-  const strongTables = availableTables.filter(t => tableMastery(stats, t) === "strong");
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(SAVE_KEY);
-      if (raw) {
-        const saved = JSON.parse(raw);
-        const savedStage = saved.stage ?? 0;
-        const savedStats = saved.stats ?? makeEmptyStats();
-        setStage(savedStage);
-        setBossMode(saved.bossMode ?? false);
-        setPlayer(saved.player ?? { x: 0, y: 0 });
-        setWorld(saved.world ?? makeWorld(savedStage, saved.bossMode ?? false));
-        setInventory(saved.inventory ?? { stone: 0, iron: 0, diamonds: 0, trophies: [] });
-        setScore(saved.score ?? 0);
-        setWeaponIndex(saved.weaponIndex ?? 0);
-        setCampaignComplete(saved.campaignComplete ?? false);
-        setStats(savedStats);
-        setQ(makeProblem(CAMPAIGN[savedStage].tables, savedStats));
-        setMessage("Saved adaptive campaign loaded.");
-      }
-    } catch (e) {
-      console.warn("Could not load save", e);
-    }
-    setLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!loaded) return;
-    const save = { stage, bossMode, player, world, inventory, score, weaponIndex, campaignComplete, stats };
-    localStorage.setItem(SAVE_KEY, JSON.stringify(save));
-  }, [loaded, stage, bossMode, player, world, inventory, score, weaponIndex, campaignComplete, stats]);
-
-  useEffect(() => {
-    function onKey(e) {
-      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) e.preventDefault();
-      if (e.key === "ArrowUp") move(0, -1);
-      if (e.key === "ArrowDown") move(0, 1);
-      if (e.key === "ArrowLeft") move(-1, 0);
-      if (e.key === "ArrowRight") move(1, 0);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  });
-
-  function move(dx, dy) {
-    if (campaignComplete) return;
-    const nx = player.x + dx;
-    const ny = player.y + dy;
-    if (nx < 0 || nx >= W || ny < 0 || ny >= H) return;
-
-    const obj = world[key(nx, ny)];
-    if (obj) {
-      setSelected({ x: nx, y: ny });
-      setMessage(obj.kind === "monster" ? `${obj.emoji} ${obj.name} blocks your path.` : `${obj.emoji} Mine ${obj.resource}.`);
-      return;
-    }
-
-    setPlayer({ x: nx, y: ny });
-    setSelected(null);
+ useEffect(()=>{
+  function onKey(e){
+   if(e.key==="ArrowUp")move(0,-1);
+   if(e.key==="ArrowDown")move(0,1);
+   if(e.key==="ArrowLeft")move(-1,0);
+   if(e.key==="ArrowRight")move(1,0);
   }
+  window.addEventListener("keydown",onKey);
+  return ()=>window.removeEventListener("keydown",onKey);
+ });
 
-  function clickTile(x, y) {
-    if (campaignComplete) return;
-    const obj = world[key(x, y)];
-    if (!obj) {
-      if (adjacent(player, { x, y })) setPlayer({ x, y });
-      return;
-    }
-    setSelected({ x, y });
-  }
+ function move(dx,dy){
+  const nx=player.x+dx,ny=player.y+dy;
+  if(nx<0||ny<0||nx>=W||ny>=H)return;
+  const obj=worldState[key(nx,ny)];
+  if(obj){setSelected({x:nx,y:ny});return;}
+  setPlayer({x:nx,y:ny});
+ }
 
-  function moveMonsters(next) {
-    const moved = { ...next };
+ function clickTile(x,y){
+  const obj=worldState[key(x,y)];
+  if(obj)setSelected({x,y});
+ }
 
-    for (const [p, obj] of Object.entries(next)) {
-      if (obj.kind !== "monster") continue;
-      const [x, y] = p.split(",").map(Number);
+ function moveMonsters(next){
+  const moved={...next};
 
-      const options = [
-        { x: x + Math.sign(player.x - x), y },
-        { x, y: y + Math.sign(player.y - y) }
-      ];
+  for(const [p,obj] of Object.entries(next)){
+   if(obj.kind!=="monster")continue;
+   const [x,y]=p.split(",").map(Number);
 
-      for (const o of options) {
-        if (o.x < 0 || o.y < 0 || o.x >= W || o.y >= H) continue;
-        const target = key(o.x, o.y);
-        if (!moved[target] && !(o.x === player.x && o.y === player.y)) {
-          delete moved[p];
-          moved[target] = obj;
-          break;
-        }
-      }
-    }
+   if(Math.abs(player.x-x)+Math.abs(player.y-y)===1){
+    const newLives=lives-1;
+    setLives(newLives);
 
-    return moved;
-  }
-
-  function nextQuestion(nextStats = stats, nextStage = stage) {
-    setQ(makeProblem(CAMPAIGN[nextStage].tables, nextStats));
-  }
-
-  function summonBoss() {
-    setBossMode(true);
-    setWorld(makeWorld(stage, true));
-    setPlayer({ x: 0, y: 0 });
-    setSelected(null);
-    setBossIntro(CAMPAIGN[stage].intro);
-    setMessage(`🐉 ${CAMPAIGN[stage].boss.name} has appeared!`);
-    setTimeout(() => setBossIntro(null), 1600);
-  }
-
-  function nextStage() {
-    if (stage === 2) {
-      setCampaignComplete(true);
-      setMessage("🏆 CAMPAIGN COMPLETE! All three boss trophies are unlocked.");
-      return;
-    }
-
-    const next = stage + 1;
-    setStage(next);
-    setBossMode(false);
-    setWorld(makeWorld(next, false));
-    setPlayer({ x: 0, y: 0 });
-    setSelected(null);
-    setQ(makeProblem(CAMPAIGN[next].tables, stats));
-    setMessage(`Entering ${CAMPAIGN[next].theme}. New tables unlocked.`);
-  }
-
-  function solve() {
-    if (campaignComplete) return;
-
-    if (!selectedObj) {
-      setMessage("Select a monster or block first.");
-      return;
-    }
-
-    const correct = Number(answer) === q.answer;
-    const updatedStats = updateStats(stats, q, correct);
-    setStats(updatedStats);
-
-    if (!correct) {
-      setLastFeedback(`Practising ×${q.table}: the game will bring this table back soon.`);
-      setMessage(`🔧 Recipe fizzled. Correct answer was ${q.answer}. Try the next one.`);
-      setEffect(selected);
-      setAnswer("");
-      nextQuestion(updatedStats);
-      setTimeout(() => setEffect(null), 350);
-      return;
-    }
-
-    setLastFeedback(`Nice. ×${q.table} streak is now ${updatedStats[q.table].streak}.`);
-    let next = { ...world };
-    const p = key(selected.x, selected.y);
-
-    if (selectedObj.kind === "block") {
-      delete next[p];
-      setInventory(v => ({ ...v, [selectedObj.resource]: v[selectedObj.resource] + 1 }));
-      setScore(s => s + 1);
-      setFloating({ at: selected, text: `+1 ${selectedObj.resource}` });
-      setMessage(`⛏️ Collected ${selectedObj.resource}.`);
-    }
-
-    if (selectedObj.kind === "monster") {
-      const critical = Math.random() < 0.18;
-      const hit = critical ? weapon.damage * 2 : weapon.damage;
-      const hp = selectedObj.currentHp - hit;
-
-      setFloating({ at: selected, text: critical ? `CRIT -${hit}` : `-${hit}` });
-
-      if (hp <= 0) {
-        delete next[p];
-
-        if (selectedObj.isBoss) {
-          setInventory(v => ({
-            ...v,
-            trophies: [...v.trophies, {
-              name: selectedObj.name,
-              emoji: selectedObj.emoji,
-              theme: CAMPAIGN[stage].theme,
-              weapon: weapon.name
-            }]
-          }));
-          setScore(s => s + 20);
-          setMessage(`🏆 You defeated ${selectedObj.name}!`);
-          setTimeout(nextStage, 900);
-        } else {
-          setScore(s => s + 5);
-          setMessage(`⚔️ Defeated ${selectedObj.name}.`);
-        }
-      } else {
-        next[p] = { ...selectedObj, currentHp: hp };
-        setScore(s => s + 2);
-        setMessage(`⚔️ Hit ${selectedObj.name}. HP ${hp}.`);
-      }
-    }
-
-    setAnswer("");
-    setSelected(null);
-    nextQuestion(updatedStats);
-
-    const remaining = Object.values(next).filter(o => o.kind === "monster").length;
-    if (!bossMode && remaining === 0) {
-      setWorld(next);
-      setTimeout(summonBoss, 500);
+    if(newLives<=0){
+      setLives(3);
+      setPlayer({x:0,y:0});
+      setWorldState(world(stage,bossMode));
+      setMessage("💀 Monsters overwhelmed you! Back to base.");
+      return next;
     } else {
-      setWorld(moveMonsters(next));
+      setMessage(`😱 Monster attack! Lost 1 life.`);
+    }
+   }
+
+   const opts=[
+    {x:x+Math.sign(player.x-x),y},
+    {x,y:y+Math.sign(player.y-y)}
+   ];
+
+   for(const o of opts){
+    if(o.x<0||o.y<0||o.x>=W||o.y>=H)continue;
+    const target=key(o.x,o.y);
+    if(!moved[target]&&!(o.x===player.x&&o.y===player.y)){
+      delete moved[p];
+      moved[target]=obj;
+      break;
+    }
+   }
+  }
+
+  return moved;
+ }
+
+ function summonBoss(){
+  setBossMode(true);
+  setWorldState(world(stage,true));
+  setPlayer({x:0,y:0});
+  setMessage(`🐉 ${CAMPAIGN[stage].boss.name} has appeared!`);
+ }
+
+ function nextStage(){
+  if(stage===2){
+   setCampaignComplete(true);
+   setMessage("🏆 Campaign complete!");
+   return;
+  }
+  const n=stage+1;
+  setStage(n);
+  setBossMode(false);
+  setWorldState(world(n,false));
+  setPlayer({x:0,y:0});
+  setQ(makeProblem(CAMPAIGN[n].tables,stats));
+ }
+
+ function solve(){
+  if(!selectedObj)return;
+
+  const correct=Number(answer)===q.answer;
+  const updated=updateStats(stats,q,correct);
+  setStats(updated);
+
+  if(!correct){
+   setMessage(`❌ Wrong! Monsters move closer. Correct answer: ${q.answer}`);
+   setWorldState(moveMonsters(worldState));
+   setQ(makeProblem(tables,updated));
+   setAnswer("");
+   return;
+  }
+
+  let next={...worldState};
+  const p=key(selected.x,selected.y);
+
+  if(selectedObj.kind==="block"){
+   delete next[p];
+   setInventory(v=>({...v,[selectedObj.resource]:v[selectedObj.resource]+1}));
+   setScore(s=>s+1);
+  }
+
+  if(selectedObj.kind==="monster"){
+   const hit=Math.random()<0.2 ? weapon.damage*2 : weapon.damage;
+   const hp=selectedObj.currentHp-hit;
+
+   if(hp<=0){
+    delete next[p];
+
+    if(selectedObj.isBoss){
+      setInventory(v=>({
+       ...v,
+       trophies:[...v.trophies,{
+        name:selectedObj.name,
+        emoji:selectedObj.emoji
+       }]
+      }));
+      setTimeout(nextStage,700);
+    } else {
+      setScore(s=>s+5);
     }
 
-    setTimeout(() => setFloating(null), 650);
+   } else {
+    next[p]={...selectedObj,currentHp:hp};
+   }
   }
 
-  function craftWeapon(i) {
-    if (i <= weaponIndex) return;
-    const target = WEAPONS[i];
+  const remaining=Object.values(next).filter(o=>o.kind==="monster").length;
 
-    if (!canAfford(inventory, target.cost)) {
-      setMessage(`Need resources for ${target.name}.`);
-      return;
-    }
-
-    setInventory(v => ({ ...payCost(v, target.cost), trophies: v.trophies }));
-    setWeaponIndex(i);
-    setMessage(`Crafted ${target.emoji} ${target.name}!`);
+  if(!bossMode&&remaining===0){
+    setWorldState(next);
+    setTimeout(summonBoss,500);
+  } else {
+    setWorldState(moveMonsters(next));
   }
 
-  function resetCampaign() {
-    const fresh = makeInitialState();
-    setStage(fresh.stage);
-    setBossMode(fresh.bossMode);
-    setPlayer(fresh.player);
-    setWorld(fresh.world);
-    setInventory(fresh.inventory);
-    setScore(fresh.score);
-    setWeaponIndex(fresh.weaponIndex);
-    setCampaignComplete(false);
-    setSelected(null);
-    setAnswer("");
-    setStats(fresh.stats);
-    setQ(makeProblem(CAMPAIGN[0].tables, fresh.stats));
-    setMessage("New adaptive campaign started.");
-    localStorage.removeItem(SAVE_KEY);
+  setSelected(null);
+  setAnswer("");
+  setQ(makeProblem(tables,updated));
+ }
+
+ function craft(i){
+  if(i<=weaponIndex)return;
+  const w=WEAPONS[i];
+
+  const ok=Object.entries(w.cost).every(([r,a])=>inventory[r]>=a);
+  if(!ok){
+   setMessage(`Need more resources for ${w.name}`);
+   return;
   }
 
-  return (
-    <main style={styles.main}>
-      {bossIntro && <div style={styles.overlay}><div style={styles.bossIntro}>⚠️ {bossIntro}</div></div>}
+  const next={...inventory};
+  Object.entries(w.cost).forEach(([r,a])=>next[r]-=a);
 
-      <div style={styles.container}>
-        <h1 style={styles.title}>MathCraft Campaign v6</h1>
-        <p style={styles.subtitle}>Adaptive math engine · saved progress · weapons · boss trophies</p>
+  setInventory(next);
+  setWeaponIndex(i);
+ }
 
-        <div style={styles.grid}>
-          <section style={styles.panel}>
-            <div style={styles.boardHeader}>
-              <strong>{CAMPAIGN[stage].theme}</strong>
-              <strong>Stage {stage + 1}/3</strong>
-            </div>
+ function reset(){
+  localStorage.removeItem(SAVE_KEY);
+  location.reload();
+ }
 
-            <div style={{ display: "grid", gridTemplateColumns: `repeat(${W},1fr)`, gap: 10 }}>
-              {Array.from({ length: W * H }).map((_, i) => {
-                const x = i % W;
-                const y = Math.floor(i / W);
-                const obj = world[key(x, y)];
-                const isPlayer = player.x === x && player.y === y;
-                const isSelected = selected && selected.x === x && selected.y === y;
-                const isEffect = effect && effect.x === x && effect.y === y;
-                const isFloating = floating && floating.at.x === x && floating.at.y === y;
+ const practice=tables.filter(t=>mastery(stats,t)==="practice");
+ const strong=tables.filter(t=>mastery(stats,t)==="strong");
 
-                return (
-                  <div
-                    key={i}
-                    onClick={() => clickTile(x, y)}
-                    style={{
-                      ...styles.tile,
-                      outline: isSelected ? "4px solid gold" : "none",
-                      transform: isEffect ? "scale(1.08) rotate(-3deg)" : "scale(1)",
-                      background: obj?.kind === "monster"
-                        ? obj.isBoss
-                          ? "linear-gradient(135deg,#991b1b,#431407)"
-                          : "linear-gradient(135deg,#7f1d1d,#111827)"
-                        : obj?.kind === "block"
-                          ? "linear-gradient(135deg,#6b7280,#374151)"
-                          : styles.tile.background
-                    }}
-                  >
-                    {isFloating && <span style={styles.float}>{floating.text}</span>}
-                    {isPlayer ? "🧍" : obj ? obj.emoji : ""}
-                    {obj?.kind === "monster" && (
-                      <div style={styles.hpBarOuter}>
-                        <div style={{ ...styles.hpBarInner, width: `${Math.max(0, (obj.currentHp / obj.maxHp) * 100)}%` }} />
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </section>
+ return <main style={styles.main}>
+  <div style={styles.container}>
+   <h1 style={styles.title}>MathCraft v7</h1>
+   <p style={styles.subtitle}>Monster pressure + lives + adaptive learning</p>
 
-          <aside style={{ display: "grid", gap: 16 }}>
-            <section style={styles.panel}>
-              <h2>🧮 Adaptive Action</h2>
-              <p style={styles.muted}>
-                {selectedObj
-                  ? selectedObj.kind === "monster"
-                    ? `${selectedObj.name} HP ${selectedObj.currentHp}/${selectedObj.maxHp}`
-                    : `Mine ${selectedObj.resource}`
-                  : "Select something"}
-              </p>
-              <div style={styles.question}>{q.a} × {q.b} = ?</div>
-              <p style={styles.muted}>Current focus: ×{q.table}</p>
-              <input
-                value={answer}
-                onChange={(e) => setAnswer(e.target.value.replace(/[^0-9]/g, ""))}
-                onKeyDown={(e) => e.key === "Enter" && solve()}
-                style={styles.input}
-              />
-              <button onClick={solve} style={styles.button}>
-                {selectedObj?.kind === "monster" ? "Attack!" : "Mine!"}
-              </button>
-            </section>
+   <div style={styles.topbar}>
+    <div>❤️ {"❤️".repeat(lives)}</div>
+    <div>⚔️ {weapon.emoji} {weapon.name}</div>
+    <div>⭐ {score}</div>
+   </div>
 
-            <section style={styles.panel}>
-              <h2>🧠 Learning Engine</h2>
-              <p style={styles.muted}>{lastFeedback}</p>
-              <p>Needs practice: {practiceTables.length ? practiceTables.map(t => `×${t}`).join(", ") : "none yet"}</p>
-              <p>Strong tables: {strongTables.length ? strongTables.map(t => `×${t}`).join(", ") : "building..."}</p>
-              <div style={styles.tableGrid}>
-                {availableTables.map(t => {
-                  const s = stats[t];
-                  const mastery = tableMastery(stats, t);
-                  return (
-                    <div key={t} style={{
-                      ...styles.masteryCard,
-                      background: mastery === "strong" ? "#14532d" : mastery === "practice" ? "#7f1d1d" : "#1f2937"
-                    }}>
-                      <strong>×{t}</strong>
-                      <small>{s.correct}/{s.attempts}</small>
-                      <small>{mastery}</small>
-                    </div>
-                  );
-                })}
-              </div>
-            </section>
+   <div style={styles.grid}>
+    <section style={styles.panel}>
+      <div style={{display:"grid",gridTemplateColumns:`repeat(${W},1fr)`,gap:10}}>
+      {Array.from({length:W*H}).map((_,i)=>{
+       const x=i%W,y=Math.floor(i/W);
+       const obj=worldState[key(x,y)];
+       const isPlayer=player.x===x&&player.y===y;
+       const isSelected=selected&&selected.x===x&&selected.y===y;
 
-            <section style={styles.panel}>
-              <h2>⚔️ Weapon</h2>
-              <p style={{ fontSize: 24 }}>{weapon.emoji} {weapon.name}</p>
-              <p>Damage: {weapon.damage}</p>
-              {WEAPONS.map((w, i) => (
-                <button
-                  key={w.name}
-                  onClick={() => craftWeapon(i)}
-                  style={{ ...styles.smallButton, opacity: i <= weaponIndex ? 0.55 : 1 }}
-                >
-                  {i <= weaponIndex ? "Unlocked" : "Craft"} {w.emoji} {w.name}
-                </button>
-              ))}
-            </section>
+       return <div key={i} onClick={()=>clickTile(x,y)} style={{
+        ...styles.tile,
+        outline:isSelected?"4px solid gold":"none",
+        background:obj?.kind==="monster"
+         ? obj.isBoss
+          ? "linear-gradient(135deg,#991b1b,#431407)"
+          : "linear-gradient(135deg,#7f1d1d,#111827)"
+         : obj?.kind==="block"
+          ? "linear-gradient(135deg,#6b7280,#374151)"
+          : styles.tile.background
+       }}>
+        {isPlayer?"🧍":obj?obj.emoji:""}
 
-            <section style={styles.panel}>
-              <h2>🎒 Inventory</h2>
-              <p>🪨 Stone: {inventory.stone}</p>
-              <p>⛓️ Iron: {inventory.iron}</p>
-              <p>💎 Diamonds: {inventory.diamonds}</p>
-              <p>⭐ Score: {score}</p>
-              <p>👹 Monsters Left: {monstersLeft}</p>
-            </section>
-
-            <section style={styles.panel}>
-              <h2>🏆 Boss Gallery</h2>
-              {[0, 1, 2].map(i => {
-                const t = inventory.trophies[i];
-                return (
-                  <div key={i} style={{ ...styles.trophy, background: t ? "#14532d" : "#1f2937" }}>
-                    {t ? (
-                      <>
-                        <div style={{ fontSize: 32 }}>{t.emoji}</div>
-                        <strong>{t.name}</strong>
-                        <div style={styles.muted}>{t.theme}</div>
-                        <small>Defeated with {t.weapon}</small>
-                      </>
-                    ) : "Locked Boss Trophy"}
-                  </div>
-                );
-              })}
-            </section>
-
-            <section style={styles.panel}>
-              <p>{message}</p>
-              <button onClick={resetCampaign} style={styles.resetButton}>Reset campaign</button>
-            </section>
-          </aside>
-        </div>
+        {obj?.kind==="monster" &&
+          <div style={styles.hpOuter}>
+            <div style={{
+             ...styles.hpInner,
+             width:`${(obj.currentHp/obj.maxHp)*100}%`
+            }}/>
+          </div>
+        }
+       </div>
+      })}
       </div>
-    </main>
-  );
+    </section>
+
+    <aside style={{display:"grid",gap:16}}>
+
+      <section style={styles.panel}>
+       <h2>🧮 Action</h2>
+       <div style={styles.question}>
+        {q.a} × {q.b} = ?
+       </div>
+
+       <input
+        value={answer}
+        onChange={e=>setAnswer(e.target.value.replace(/[^0-9]/g,""))}
+        onKeyDown={e=>e.key==="Enter"&&solve()}
+        style={styles.input}
+       />
+
+       <button onClick={solve} style={styles.button}>
+        Solve
+       </button>
+      </section>
+
+      <section style={styles.panel}>
+       <h2>🧠 Adaptive Engine</h2>
+       <p>Needs practice: {practice.length?practice.map(t=>`×${t}`).join(", "):"none"}</p>
+       <p>Strong tables: {strong.length?strong.map(t=>`×${t}`).join(", "):"building..."}</p>
+
+       <div style={styles.tableGrid}>
+       {tables.map(t=>{
+        const m=mastery(stats,t);
+        return <div key={t} style={{
+         ...styles.mastery,
+         background:m==="strong"?"#14532d":m==="practice"?"#7f1d1d":"#1f2937"
+        }}>
+         <strong>×{t}</strong>
+         <small>{m}</small>
+        </div>
+       })}
+       </div>
+      </section>
+
+      <section style={styles.panel}>
+       <h2>⚔️ Weapons</h2>
+       {WEAPONS.map((w,i)=>
+        <button key={w.name} onClick={()=>craft(i)} style={styles.smallButton}>
+         {i<=weaponIndex?"Unlocked":"Craft"} {w.emoji} {w.name}
+        </button>
+       )}
+      </section>
+
+      <section style={styles.panel}>
+       <h2>🏆 Boss Gallery</h2>
+       {[0,1,2].map(i=>{
+        const t=inventory.trophies[i];
+        return <div key={i} style={{
+         padding:12,borderRadius:12,marginBottom:10,
+         background:t?"#14532d":"#1f2937"
+        }}>
+         {t?`${t.emoji} ${t.name}`:"Locked Trophy"}
+        </div>
+       })}
+      </section>
+
+      <section style={styles.panel}>
+       <p>{message}</p>
+       <button onClick={reset} style={styles.resetButton}>Reset campaign</button>
+      </section>
+
+    </aside>
+   </div>
+  </div>
+ </main>
 }
 
-const styles = {
-  main: { minHeight: "100vh", background: "linear-gradient(135deg,#052e16,#111827)", color: "white", fontFamily: "Arial", padding: 20 },
-  container: { maxWidth: 1200, margin: "0 auto" },
-  title: { fontSize: 46, marginBottom: 6 },
-  subtitle: { color: "#bbf7d0", fontSize: 20 },
-  grid: { display: "grid", gridTemplateColumns: "1.2fr .8fr", gap: 20, marginTop: 20 },
-  panel: { background: "#0f172a", border: "2px solid #22c55e", borderRadius: 22, padding: 20 },
-  boardHeader: { display: "flex", justifyContent: "space-between", marginBottom: 14 },
-  tile: { position: "relative", width: "100%", aspectRatio: "1/1", borderRadius: 14, border: "2px solid #14532d", background: "linear-gradient(135deg,#166534,#052e16)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 42, cursor: "pointer", transition: "all .2s ease" },
-  hpBarOuter: { position: "absolute", bottom: 6, left: 8, right: 8, height: 7, borderRadius: 8, background: "#111827", overflow: "hidden" },
-  hpBarInner: { height: "100%", background: "#ef4444", transition: "width .25s ease" },
-  float: { position: "absolute", top: -12, fontSize: 18, fontWeight: "bold", color: "#facc15", textShadow: "0 2px 4px black" },
-  muted: { color: "#bbf7d0" },
-  question: { fontSize: 58, fontWeight: "bold", margin: "16px 0" },
-  input: { width: "100%", boxSizing: "border-box", fontSize: 30, padding: 14, textAlign: "center", borderRadius: 14, border: "none", marginBottom: 12 },
-  button: { width: "100%", fontSize: 22, padding: "14px 18px", borderRadius: 14, border: "none", background: "#22c55e", color: "#052e16", fontWeight: "bold", cursor: "pointer" },
-  smallButton: { width: "100%", marginTop: 8, padding: 10, borderRadius: 12, border: "1px solid #22c55e", background: "transparent", color: "#bbf7d0", cursor: "pointer" },
-  resetButton: { width: "100%", marginTop: 12, padding: 10, borderRadius: 12, border: "1px solid #ef4444", background: "transparent", color: "#fecaca", cursor: "pointer" },
-  trophy: { padding: 12, borderRadius: 12, marginBottom: 10, border: "1px solid #374151" },
-  overlay: { position: "fixed", inset: 0, background: "rgba(0,0,0,.78)", display: "grid", placeItems: "center", zIndex: 20 },
-  bossIntro: { fontSize: 44, fontWeight: "bold", color: "#facc15", textAlign: "center", padding: 30 },
-  tableGrid: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 8, marginTop: 12 },
-  masteryCard: { borderRadius: 10, padding: 8, display: "grid", gap: 3, border: "1px solid #374151" }
-};
+const styles={
+ main:{minHeight:"100vh",background:"linear-gradient(135deg,#052e16,#111827)",color:"white",fontFamily:"Arial",padding:20},
+ container:{maxWidth:1200,margin:"0 auto"},
+ title:{fontSize:46,marginBottom:6},
+ subtitle:{color:"#bbf7d0",fontSize:20},
+ topbar:{display:"flex",gap:20,fontSize:22,marginBottom:20},
+ grid:{display:"grid",gridTemplateColumns:"1.2fr .8fr",gap:20},
+ panel:{background:"#0f172a",border:"2px solid #22c55e",borderRadius:22,padding:20},
+ tile:{position:"relative",width:"100%",aspectRatio:"1/1",borderRadius:14,border:"2px solid #14532d",background:"linear-gradient(135deg,#166534,#052e16)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:42,cursor:"pointer"},
+ hpOuter:{position:"absolute",bottom:6,left:8,right:8,height:7,borderRadius:8,background:"#111827",overflow:"hidden"},
+ hpInner:{height:"100%",background:"#ef4444"},
+ question:{fontSize:58,fontWeight:"bold",margin:"16px 0"},
+ input:{width:"100%",boxSizing:"border-box",fontSize:30,padding:14,textAlign:"center",borderRadius:14,border:"none",marginBottom:12},
+ button:{width:"100%",fontSize:22,padding:"14px 18px",borderRadius:14,border:"none",background:"#22c55e",color:"#052e16",fontWeight:"bold"},
+ smallButton:{width:"100%",marginTop:8,padding:10,borderRadius:12,border:"1px solid #22c55e",background:"transparent",color:"#bbf7d0"},
+ resetButton:{width:"100%",marginTop:12,padding:10,borderRadius:12,border:"1px solid #ef4444",background:"transparent",color:"#fecaca"},
+ tableGrid:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8},
+ mastery:{borderRadius:10,padding:8,display:"grid",gap:3}
+}
