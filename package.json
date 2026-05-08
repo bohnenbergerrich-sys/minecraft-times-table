@@ -1,6 +1,6 @@
 {
-  "name": "mathcraft-campaign-v6",
-  "version": "0.6.0",
+  "name": "mathcraft-v7",
+  "version": "0.7.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
