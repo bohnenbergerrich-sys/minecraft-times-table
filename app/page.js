@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 
-const W=6,H=5,SAVE_KEY="mathcraft_v7_save";
+const W=6,H=5,SAVE_KEY="mathcraft_v8_save";
 
 const CAMPAIGN=[
  {boss:{name:"Cave Troll",emoji:"🪨",hp:10},tables:[1,2,5],theme:"Stone Caves"},
@@ -31,6 +31,7 @@ const WEAPONS=[
 
 const pick=a=>a[Math.floor(Math.random()*a.length)];
 const key=(x,y)=>`${x},${y}`;
+const adjacent=(a,b)=>Math.abs(a.x-b.x)+Math.abs(a.y-b.y)===1;
 
 function emptyStats(){
  const s={};
@@ -40,7 +41,7 @@ function emptyStats(){
 
 function chooseTable(tables,stats){
  const weighted=tables.map(t=>{
-  const s=stats[t];
+  const s=stats[t]||{attempts:0,correct:0,wrong:0,streak:0};
   const acc=s.attempts? s.correct/s.attempts : .5;
   let w=1;
   if(acc<0.7)w+=5;
@@ -50,10 +51,7 @@ function chooseTable(tables,stats){
  });
  const total=weighted.reduce((a,b)=>a+b.w,0);
  let r=Math.random()*total;
- for(const item of weighted){
-  r-=item.w;
-  if(r<=0)return item.t;
- }
+ for(const item of weighted){r-=item.w;if(r<=0)return item.t;}
  return pick(tables);
 }
 
@@ -64,19 +62,20 @@ function makeProblem(tables,stats){
 }
 
 function updateStats(stats,q,correct){
+ const current=stats[q.table]||{attempts:0,correct:0,wrong:0,streak:0};
  return {
   ...stats,
   [q.table]:{
-   attempts:stats[q.table].attempts+1,
-   correct:stats[q.table].correct+(correct?1:0),
-   wrong:stats[q.table].wrong+(correct?0:1),
-   streak:correct?stats[q.table].streak+1:0
+   attempts:current.attempts+1,
+   correct:current.correct+(correct?1:0),
+   wrong:current.wrong+(correct?0:1),
+   streak:correct?current.streak+1:0
   }
  }
 }
 
 function mastery(stats,t){
- const s=stats[t];
+ const s=stats[t]||{attempts:0,correct:0,wrong:0,streak:0};
  if(s.attempts<3)return "new";
  const acc=s.correct/s.attempts;
  if(acc>.85&&s.streak>=4)return "strong";
@@ -88,10 +87,8 @@ function world(stage,boss=false){
  const w={},used=new Set(["0,0"]);
  function place(o){
   let x,y;
-  do{
-   x=Math.floor(Math.random()*W);
-   y=Math.floor(Math.random()*H);
-  }while(used.has(key(x,y)));
+  do{x=Math.floor(Math.random()*W);y=Math.floor(Math.random()*H);}
+  while(used.has(key(x,y)));
   used.add(key(x,y));
   w[key(x,y)]={...o};
  }
@@ -120,9 +117,10 @@ export default function Home(){
  const [inventory,setInventory]=useState({stone:0,iron:0,diamonds:0,trophies:[]});
  const [weaponIndex,setWeaponIndex]=useState(0);
  const [score,setScore]=useState(0);
- const [message,setMessage]=useState("Wrong answers let monsters move closer!");
+ const [message,setMessage]=useState("Use arrow keys, tap a green square, or use the D-pad.");
  const [lives,setLives]=useState(3);
  const [campaignComplete,setCampaignComplete]=useState(false);
+ const [lastMove,setLastMove]=useState(null);
 
  const weapon=WEAPONS[weaponIndex];
  const selectedObj=selected?worldState[key(selected.x,selected.y)]:null;
@@ -155,6 +153,7 @@ export default function Home(){
 
  useEffect(()=>{
   function onKey(e){
+   if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key))e.preventDefault();
    if(e.key==="ArrowUp")move(0,-1);
    if(e.key==="ArrowDown")move(0,1);
    if(e.key==="ArrowLeft")move(-1,0);
@@ -164,17 +163,36 @@ export default function Home(){
   return ()=>window.removeEventListener("keydown",onKey);
  });
 
+ function isReachable(x,y){
+  return adjacent(player,{x,y})&&!worldState[key(x,y)];
+ }
+
  function move(dx,dy){
+  if(campaignComplete)return;
   const nx=player.x+dx,ny=player.y+dy;
   if(nx<0||ny<0||nx>=W||ny>=H)return;
   const obj=worldState[key(nx,ny)];
-  if(obj){setSelected({x:nx,y:ny});return;}
+  if(obj){setSelected({x:nx,y:ny});setMessage(obj.kind==="monster"?`${obj.emoji} blocks your way. Solve to attack.`:`${obj.emoji} blocks your way. Solve to mine.`);return;}
   setPlayer({x:nx,y:ny});
+  setLastMove({x:nx,y:ny});
+  setSelected(null);
+  setMessage("Moved. Tap a block or monster, or keep exploring.");
+  setTimeout(()=>setLastMove(null),250);
  }
 
  function clickTile(x,y){
+  if(campaignComplete)return;
   const obj=worldState[key(x,y)];
-  if(obj)setSelected({x,y});
+  if(obj){setSelected({x,y});return;}
+  if(isReachable(x,y)){
+   setPlayer({x,y});
+   setLastMove({x,y});
+   setSelected(null);
+   setMessage("Moved by touch.");
+   setTimeout(()=>setLastMove(null),250);
+  } else {
+   setMessage("Tap a glowing green square next to the player, or use the D-pad.");
+  }
  }
 
  function moveMonsters(next){
@@ -192,6 +210,7 @@ export default function Home(){
       setLives(3);
       setPlayer({x:0,y:0});
       setWorldState(world(stage,bossMode));
+      setSelected(null);
       setMessage("💀 Monsters overwhelmed you! Back to base.");
       return next;
     } else {
@@ -214,7 +233,6 @@ export default function Home(){
     }
    }
   }
-
   return moved;
  }
 
@@ -222,6 +240,7 @@ export default function Home(){
   setBossMode(true);
   setWorldState(world(stage,true));
   setPlayer({x:0,y:0});
+  setSelected(null);
   setMessage(`🐉 ${CAMPAIGN[stage].boss.name} has appeared!`);
  }
 
@@ -236,6 +255,7 @@ export default function Home(){
   setBossMode(false);
   setWorldState(world(n,false));
   setPlayer({x:0,y:0});
+  setSelected(null);
   setQ(makeProblem(CAMPAIGN[n].tables,stats));
  }
 
@@ -271,18 +291,11 @@ export default function Home(){
     delete next[p];
 
     if(selectedObj.isBoss){
-      setInventory(v=>({
-       ...v,
-       trophies:[...v.trophies,{
-        name:selectedObj.name,
-        emoji:selectedObj.emoji
-       }]
-      }));
+      setInventory(v=>({...v,trophies:[...v.trophies,{name:selectedObj.name,emoji:selectedObj.emoji}]}));
       setTimeout(nextStage,700);
     } else {
       setScore(s=>s+5);
     }
-
    } else {
     next[p]={...selectedObj,currentHp:hp};
    }
@@ -305,16 +318,10 @@ export default function Home(){
  function craft(i){
   if(i<=weaponIndex)return;
   const w=WEAPONS[i];
-
   const ok=Object.entries(w.cost).every(([r,a])=>inventory[r]>=a);
-  if(!ok){
-   setMessage(`Need more resources for ${w.name}`);
-   return;
-  }
-
+  if(!ok){setMessage(`Need more resources for ${w.name}`);return;}
   const next={...inventory};
   Object.entries(w.cost).forEach(([r,a])=>next[r]-=a);
-
   setInventory(next);
   setWeaponIndex(i);
  }
@@ -329,84 +336,79 @@ export default function Home(){
 
  return <main style={styles.main}>
   <div style={styles.container}>
-   <h1 style={styles.title}>MathCraft v7</h1>
-   <p style={styles.subtitle}>Monster pressure + lives + adaptive learning</p>
+   <h1 style={styles.title}>MathCraft v8</h1>
+   <p style={styles.subtitle}>Mobile controls + tap-to-move + adaptive learning</p>
 
    <div style={styles.topbar}>
-    <div>❤️ {"❤️".repeat(lives)}</div>
+    <div>{"❤️".repeat(lives)}</div>
     <div>⚔️ {weapon.emoji} {weapon.name}</div>
     <div>⭐ {score}</div>
    </div>
 
-   <div style={styles.grid}>
+   <div style={styles.layout}>
     <section style={styles.panel}>
+      <p style={{color:"#bbf7d0",marginTop:0}}>Tap glowing green squares to move. Tap monsters or blocks to select.</p>
       <div style={{display:"grid",gridTemplateColumns:`repeat(${W},1fr)`,gap:10}}>
       {Array.from({length:W*H}).map((_,i)=>{
        const x=i%W,y=Math.floor(i/W);
        const obj=worldState[key(x,y)];
        const isPlayer=player.x===x&&player.y===y;
        const isSelected=selected&&selected.x===x&&selected.y===y;
+       const reachable=isReachable(x,y);
+       const moved=lastMove&&lastMove.x===x&&lastMove.y===y;
 
        return <div key={i} onClick={()=>clickTile(x,y)} style={{
         ...styles.tile,
-        outline:isSelected?"4px solid gold":"none",
+        outline:isSelected?"4px solid gold":reachable?"4px solid #86efac":"none",
+        transform:moved?"scale(1.08)":"scale(1)",
         background:obj?.kind==="monster"
          ? obj.isBoss
           ? "linear-gradient(135deg,#991b1b,#431407)"
           : "linear-gradient(135deg,#7f1d1d,#111827)"
          : obj?.kind==="block"
           ? "linear-gradient(135deg,#6b7280,#374151)"
-          : styles.tile.background
+          : reachable
+           ? "linear-gradient(135deg,#22c55e,#166534)"
+           : styles.tile.background
        }}>
-        {isPlayer?"🧍":obj?obj.emoji:""}
+        {isPlayer?"🧍":obj?obj.emoji:reachable?"·":""}
 
         {obj?.kind==="monster" &&
           <div style={styles.hpOuter}>
-            <div style={{
-             ...styles.hpInner,
-             width:`${(obj.currentHp/obj.maxHp)*100}%`
-            }}/>
+            <div style={{...styles.hpInner,width:`${(obj.currentHp/obj.maxHp)*100}%`}}/>
           </div>
         }
        </div>
       })}
       </div>
+
+      <div style={styles.dpad}>
+        <div></div>
+        <button style={styles.dpadBtn} onClick={()=>move(0,-1)}>⬆️</button>
+        <div></div>
+        <button style={styles.dpadBtn} onClick={()=>move(-1,0)}>⬅️</button>
+        <button style={styles.dpadBtn} onClick={()=>move(0,1)}>⬇️</button>
+        <button style={styles.dpadBtn} onClick={()=>move(1,0)}>➡️</button>
+      </div>
     </section>
 
     <aside style={{display:"grid",gap:16}}>
-
       <section style={styles.panel}>
        <h2>🧮 Action</h2>
-       <div style={styles.question}>
-        {q.a} × {q.b} = ?
-       </div>
-
-       <input
-        value={answer}
-        onChange={e=>setAnswer(e.target.value.replace(/[^0-9]/g,""))}
-        onKeyDown={e=>e.key==="Enter"&&solve()}
-        style={styles.input}
-       />
-
-       <button onClick={solve} style={styles.button}>
-        Solve
-       </button>
+       <div style={styles.question}>{q.a} × {q.b} = ?</div>
+       <input value={answer} onChange={e=>setAnswer(e.target.value.replace(/[^0-9]/g,""))} onKeyDown={e=>e.key==="Enter"&&solve()} style={styles.input}/>
+       <button onClick={solve} style={styles.button}>Solve</button>
       </section>
 
       <section style={styles.panel}>
        <h2>🧠 Adaptive Engine</h2>
        <p>Needs practice: {practice.length?practice.map(t=>`×${t}`).join(", "):"none"}</p>
        <p>Strong tables: {strong.length?strong.map(t=>`×${t}`).join(", "):"building..."}</p>
-
        <div style={styles.tableGrid}>
        {tables.map(t=>{
         const m=mastery(stats,t);
-        return <div key={t} style={{
-         ...styles.mastery,
-         background:m==="strong"?"#14532d":m==="practice"?"#7f1d1d":"#1f2937"
-        }}>
-         <strong>×{t}</strong>
-         <small>{m}</small>
+        return <div key={t} style={{...styles.mastery,background:m==="strong"?"#14532d":m==="practice"?"#7f1d1d":"#1f2937"}}>
+         <strong>×{t}</strong><small>{m}</small>
         </div>
        })}
        </div>
@@ -414,21 +416,14 @@ export default function Home(){
 
       <section style={styles.panel}>
        <h2>⚔️ Weapons</h2>
-       {WEAPONS.map((w,i)=>
-        <button key={w.name} onClick={()=>craft(i)} style={styles.smallButton}>
-         {i<=weaponIndex?"Unlocked":"Craft"} {w.emoji} {w.name}
-        </button>
-       )}
+       {WEAPONS.map((w,i)=><button key={w.name} onClick={()=>craft(i)} style={styles.smallButton}>{i<=weaponIndex?"Unlocked":"Craft"} {w.emoji} {w.name}</button>)}
       </section>
 
       <section style={styles.panel}>
        <h2>🏆 Boss Gallery</h2>
        {[0,1,2].map(i=>{
         const t=inventory.trophies[i];
-        return <div key={i} style={{
-         padding:12,borderRadius:12,marginBottom:10,
-         background:t?"#14532d":"#1f2937"
-        }}>
+        return <div key={i} style={{padding:12,borderRadius:12,marginBottom:10,background:t?"#14532d":"#1f2937"}}>
          {t?`${t.emoji} ${t.name}`:"Locked Trophy"}
         </div>
        })}
@@ -438,7 +433,6 @@ export default function Home(){
        <p>{message}</p>
        <button onClick={reset} style={styles.resetButton}>Reset campaign</button>
       </section>
-
     </aside>
    </div>
   </div>
@@ -446,21 +440,23 @@ export default function Home(){
 }
 
 const styles={
- main:{minHeight:"100vh",background:"linear-gradient(135deg,#052e16,#111827)",color:"white",fontFamily:"Arial",padding:20},
+ main:{minHeight:"100vh",background:"linear-gradient(135deg,#052e16,#111827)",color:"white",fontFamily:"Arial",padding:16},
  container:{maxWidth:1200,margin:"0 auto"},
- title:{fontSize:46,marginBottom:6},
- subtitle:{color:"#bbf7d0",fontSize:20},
- topbar:{display:"flex",gap:20,fontSize:22,marginBottom:20},
- grid:{display:"grid",gridTemplateColumns:"1.2fr .8fr",gap:20},
- panel:{background:"#0f172a",border:"2px solid #22c55e",borderRadius:22,padding:20},
- tile:{position:"relative",width:"100%",aspectRatio:"1/1",borderRadius:14,border:"2px solid #14532d",background:"linear-gradient(135deg,#166534,#052e16)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:42,cursor:"pointer"},
+ title:{fontSize:"clamp(32px,6vw,46px)",marginBottom:6},
+ subtitle:{color:"#bbf7d0",fontSize:"clamp(16px,3vw,20px)"},
+ topbar:{display:"flex",gap:14,fontSize:"clamp(18px,4vw,22px)",marginBottom:18,flexWrap:"wrap"},
+ layout:{display:"grid",gridTemplateColumns:"minmax(0,1.2fr) minmax(300px,.8fr)",gap:20},
+ panel:{background:"#0f172a",border:"2px solid #22c55e",borderRadius:22,padding:16},
+ tile:{position:"relative",width:"100%",aspectRatio:"1/1",borderRadius:14,border:"2px solid #14532d",background:"linear-gradient(135deg,#166534,#052e16)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"clamp(28px,6vw,42px)",cursor:"pointer",transition:"all .18s ease",touchAction:"manipulation"},
  hpOuter:{position:"absolute",bottom:6,left:8,right:8,height:7,borderRadius:8,background:"#111827",overflow:"hidden"},
  hpInner:{height:"100%",background:"#ef4444"},
- question:{fontSize:58,fontWeight:"bold",margin:"16px 0"},
+ question:{fontSize:"clamp(40px,8vw,58px)",fontWeight:"bold",margin:"16px 0"},
  input:{width:"100%",boxSizing:"border-box",fontSize:30,padding:14,textAlign:"center",borderRadius:14,border:"none",marginBottom:12},
  button:{width:"100%",fontSize:22,padding:"14px 18px",borderRadius:14,border:"none",background:"#22c55e",color:"#052e16",fontWeight:"bold"},
  smallButton:{width:"100%",marginTop:8,padding:10,borderRadius:12,border:"1px solid #22c55e",background:"transparent",color:"#bbf7d0"},
  resetButton:{width:"100%",marginTop:12,padding:10,borderRadius:12,border:"1px solid #ef4444",background:"transparent",color:"#fecaca"},
  tableGrid:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8},
- mastery:{borderRadius:10,padding:8,display:"grid",gap:3}
+ mastery:{borderRadius:10,padding:8,display:"grid",gap:3},
+ dpad:{display:"grid",gridTemplateColumns:"repeat(3,64px)",gap:8,justifyContent:"center",marginTop:18},
+ dpadBtn:{width:64,height:54,borderRadius:16,border:"2px solid #22c55e",background:"#052e16",color:"white",fontSize:24}
 }
