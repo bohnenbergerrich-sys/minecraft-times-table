@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "MathCraft v8",
-  description: "Mobile-friendly adaptive dungeon math game"
+  title: 'MathCraft v0.9.0',
+  description: 'Mobile-first Minecraft-inspired multiplication practice game',
 };
 
 export default function RootLayout({ children }) {

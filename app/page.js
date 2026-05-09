@@ -1,462 +1,328 @@
-"use client";
-import { useEffect, useMemo, useState } from "react";
+'use client';
 
-const W=6,H=5,SAVE_KEY="mathcraft_v8_save";
+import { useEffect, useMemo, useState } from 'react';
 
-const CAMPAIGN=[
- {boss:{name:"Cave Troll",emoji:"🪨",hp:10},tables:[1,2,5],theme:"Stone Caves"},
- {boss:{name:"Lava Dragon",emoji:"🐲",hp:15},tables:[1,2,3,4,5,6],theme:"Lava Fortress"},
- {boss:{name:"Ender King",emoji:"👑",hp:20},tables:[1,2,3,4,5,6,7,8,9,10],theme:"End Realm"},
+const VERSION = 'v0.9.0-mobile-first';
+const GRID = 6;
+const START_POS = { x: 0, y: 0 };
+
+const BOSSES = [
+  { name: 'Cave Troll', emoji: '🧌', hp: 20, tableBias: [2, 3, 4] },
+  { name: 'Lava Dragon', emoji: '🐉', hp: 32, tableBias: [5, 6, 7] },
+  { name: 'Ender King', emoji: '👑', hp: 45, tableBias: [8, 9, 10, 11, 12] },
 ];
 
-const MONSTERS=[
- {name:"Zombie",emoji:"🧟",hp:3},
- {name:"Spider",emoji:"🕷️",hp:3},
- {name:"Skeleton",emoji:"💀",hp:4},
- {name:"Creeper",emoji:"🧨",hp:4},
-];
+const TILE_TYPES = {
+  empty: { emoji: '', label: 'Floor' },
+  rock: { emoji: '🪨', label: 'Rock' },
+  wood: { emoji: '🪵', label: 'Wood' },
+  gem: { emoji: '💎', label: 'Gem' },
+  monster: { emoji: '🧟', label: 'Monster' },
+  boss: { emoji: '👑', label: 'Boss' },
+  chest: { emoji: '🎁', label: 'Chest' },
+};
 
-const BLOCKS=[
- {type:"stone",emoji:"🪨",resource:"stone"},
- {type:"iron",emoji:"⛓️",resource:"iron"},
- {type:"diamond",emoji:"💎",resource:"diamonds"},
-];
+const makeStats = () => {
+  const stats = {};
+  for (let i = 1; i <= 12; i++) stats[i] = { attempts: 0, correct: 0, wrong: 0, streak: 0 };
+  return stats;
+};
 
-const WEAPONS=[
- {name:"Wooden Sword",emoji:"🪵⚔️",damage:1,cost:{}},
- {name:"Stone Sword",emoji:"🪨⚔️",damage:2,cost:{stone:4}},
- {name:"Iron Sword",emoji:"⚔️",damage:4,cost:{iron:3,stone:2}},
- {name:"Diamond Sword",emoji:"💎⚔️",damage:7,cost:{diamonds:2,iron:2}},
-];
+const initialState = () => ({
+  player: START_POS,
+  lives: 3,
+  stars: 0,
+  wood: 0,
+  stone: 0,
+  gems: 0,
+  weapon: { name: 'Wooden Sword', power: 4, emoji: '⚔️' },
+  bossIndex: 0,
+  bossHp: BOSSES[0].hp,
+  trophies: [],
+  stats: makeStats(),
+  log: ['Welcome to MathCraft. Tap a glowing tile to move or act.'],
+  boardSeed: 1,
+});
 
-const pick=a=>a[Math.floor(Math.random()*a.length)];
-const key=(x,y)=>`${x},${y}`;
-const adjacent=(a,b)=>Math.abs(a.x-b.x)+Math.abs(a.y-b.y)===1;
-
-function emptyStats(){
- const s={};
- for(let i=1;i<=10;i++)s[i]={attempts:0,correct:0,wrong:0,streak:0};
- return s;
+function rand(seed) {
+  const x = Math.sin(seed) * 10000;
+  return x - Math.floor(x);
 }
 
-function chooseTable(tables,stats){
- const weighted=tables.map(t=>{
-  const s=stats[t]||{attempts:0,correct:0,wrong:0,streak:0};
-  const acc=s.attempts? s.correct/s.attempts : .5;
-  let w=1;
-  if(acc<0.7)w+=5;
-  if(s.wrong>2)w+=3;
-  if(s.streak>=4&&acc>.85)w-=2;
-  return {t,w:Math.max(1,w)};
- });
- const total=weighted.reduce((a,b)=>a+b.w,0);
- let r=Math.random()*total;
- for(const item of weighted){r-=item.w;if(r<=0)return item.t;}
- return pick(tables);
-}
-
-function makeProblem(tables,stats){
- const b=chooseTable(tables,stats);
- const a=Math.floor(Math.random()*10)+1;
- return {a,b,answer:a*b,table:b};
-}
-
-function updateStats(stats,q,correct){
- const current=stats[q.table]||{attempts:0,correct:0,wrong:0,streak:0};
- return {
-  ...stats,
-  [q.table]:{
-   attempts:current.attempts+1,
-   correct:current.correct+(correct?1:0),
-   wrong:current.wrong+(correct?0:1),
-   streak:correct?current.streak+1:0
-  }
- }
-}
-
-function mastery(stats,t){
- const s=stats[t]||{attempts:0,correct:0,wrong:0,streak:0};
- if(s.attempts<3)return "new";
- const acc=s.correct/s.attempts;
- if(acc>.85&&s.streak>=4)return "strong";
- if(acc<.6)return "practice";
- return "building";
-}
-
-function world(stage,boss=false){
- const w={},used=new Set(["0,0"]);
- function place(o){
-  let x,y;
-  do{x=Math.floor(Math.random()*W);y=Math.floor(Math.random()*H);}
-  while(used.has(key(x,y)));
-  used.add(key(x,y));
-  w[key(x,y)]={...o};
- }
- for(let i=0;i<7;i++)place({kind:"block",...pick(BLOCKS)});
- if(boss){
-  const b=CAMPAIGN[stage].boss;
-  place({kind:"monster",...b,currentHp:b.hp,maxHp:b.hp,isBoss:true});
- } else {
-  for(let i=0;i<3;i++){
-   const m=pick(MONSTERS);
-   place({kind:"monster",...m,currentHp:m.hp,maxHp:m.hp});
-  }
- }
- return w;
-}
-
-export default function Home(){
- const [stage,setStage]=useState(0);
- const [bossMode,setBossMode]=useState(false);
- const [worldState,setWorldState]=useState(()=>world(0,false));
- const [player,setPlayer]=useState({x:0,y:0});
- const [selected,setSelected]=useState(null);
- const [stats,setStats]=useState(()=>emptyStats());
- const [q,setQ]=useState(()=>makeProblem(CAMPAIGN[0].tables,emptyStats()));
- const [answer,setAnswer]=useState("");
- const [inventory,setInventory]=useState({stone:0,iron:0,diamonds:0,trophies:[]});
- const [weaponIndex,setWeaponIndex]=useState(0);
- const [score,setScore]=useState(0);
- const [message,setMessage]=useState("Use arrow keys, tap a green square, or use the D-pad.");
- const [lives,setLives]=useState(3);
- const [campaignComplete,setCampaignComplete]=useState(false);
- const [lastMove,setLastMove]=useState(null);
-
- const weapon=WEAPONS[weaponIndex];
- const selectedObj=selected?worldState[key(selected.x,selected.y)]:null;
- const tables=CAMPAIGN[stage].tables;
-
- useEffect(()=>{
-  try{
-   const raw=localStorage.getItem(SAVE_KEY);
-   if(raw){
-    const s=JSON.parse(raw);
-    setStage(s.stage||0);
-    setBossMode(s.bossMode||false);
-    setWorldState(s.worldState||world(0,false));
-    setPlayer(s.player||{x:0,y:0});
-    setStats(s.stats||emptyStats());
-    setInventory(s.inventory||{stone:0,iron:0,diamonds:0,trophies:[]});
-    setWeaponIndex(s.weaponIndex||0);
-    setScore(s.score||0);
-    setLives(s.lives||3);
-    setCampaignComplete(s.campaignComplete||false);
-   }
-  }catch{}
- },[]);
-
- useEffect(()=>{
-  localStorage.setItem(SAVE_KEY,JSON.stringify({
-   stage,bossMode,worldState,player,stats,inventory,weaponIndex,score,lives,campaignComplete
-  }));
- },[stage,bossMode,worldState,player,stats,inventory,weaponIndex,score,lives,campaignComplete]);
-
- useEffect(()=>{
-  function onKey(e){
-   if(["ArrowUp","ArrowDown","ArrowLeft","ArrowRight"].includes(e.key))e.preventDefault();
-   if(e.key==="ArrowUp")move(0,-1);
-   if(e.key==="ArrowDown")move(0,1);
-   if(e.key==="ArrowLeft")move(-1,0);
-   if(e.key==="ArrowRight")move(1,0);
-  }
-  window.addEventListener("keydown",onKey);
-  return ()=>window.removeEventListener("keydown",onKey);
- });
-
- function isReachable(x,y){
-  return adjacent(player,{x,y})&&!worldState[key(x,y)];
- }
-
- function move(dx,dy){
-  if(campaignComplete)return;
-  const nx=player.x+dx,ny=player.y+dy;
-  if(nx<0||ny<0||nx>=W||ny>=H)return;
-  const obj=worldState[key(nx,ny)];
-  if(obj){setSelected({x:nx,y:ny});setMessage(obj.kind==="monster"?`${obj.emoji} blocks your way. Solve to attack.`:`${obj.emoji} blocks your way. Solve to mine.`);return;}
-  setPlayer({x:nx,y:ny});
-  setLastMove({x:nx,y:ny});
-  setSelected(null);
-  setMessage("Moved. Tap a block or monster, or keep exploring.");
-  setTimeout(()=>setLastMove(null),250);
- }
-
- function clickTile(x,y){
-  if(campaignComplete)return;
-  const obj=worldState[key(x,y)];
-  if(obj){setSelected({x,y});return;}
-  if(isReachable(x,y)){
-   setPlayer({x,y});
-   setLastMove({x,y});
-   setSelected(null);
-   setMessage("Moved by touch.");
-   setTimeout(()=>setLastMove(null),250);
-  } else {
-   setMessage("Tap a glowing green square next to the player, or use the D-pad.");
-  }
- }
-
- function moveMonsters(next){
-  const moved={...next};
-
-  for(const [p,obj] of Object.entries(next)){
-   if(obj.kind!=="monster")continue;
-   const [x,y]=p.split(",").map(Number);
-
-   if(Math.abs(player.x-x)+Math.abs(player.y-y)===1){
-    const newLives=lives-1;
-    setLives(newLives);
-
-    if(newLives<=0){
-      setLives(3);
-      setPlayer({x:0,y:0});
-      setWorldState(world(stage,bossMode));
-      setSelected(null);
-      setMessage("💀 Monsters overwhelmed you! Back to base.");
-      return next;
-    } else {
-      setMessage(`😱 Monster attack! Lost 1 life.`);
+function makeBoard(seed, bossIndex) {
+  const board = Array.from({ length: GRID }, () => Array.from({ length: GRID }, () => ({ type: 'empty' })));
+  board[0][0] = { type: 'base' };
+  const items = [
+    ['rock', 5], ['wood', 5], ['gem', 4], ['monster', 4], ['chest', 2]
+  ];
+  let s = seed * 17 + bossIndex * 101;
+  for (const [type, count] of items) {
+    for (let i = 0; i < count; i++) {
+      let placed = false;
+      let tries = 0;
+      while (!placed && tries < 80) {
+        tries++;
+        s += 1;
+        const x = Math.floor(rand(s) * GRID);
+        const y = Math.floor(rand(s + 99) * GRID);
+        if ((x === 0 && y === 0) || board[y][x].type !== 'empty') continue;
+        board[y][x] = { type };
+        placed = true;
+      }
     }
-   }
+  }
+  board[GRID - 1][GRID - 1] = { type: 'boss' };
+  return board;
+}
 
-   const opts=[
-    {x:x+Math.sign(player.x-x),y},
-    {x,y:y+Math.sign(player.y-y)}
-   ];
+function keyOf(pos) { return `${pos.x},${pos.y}`; }
+function dist(a, b) { return Math.abs(a.x - b.x) + Math.abs(a.y - b.y); }
+function adjacent(a, b) { return dist(a, b) === 1; }
 
-   for(const o of opts){
-    if(o.x<0||o.y<0||o.x>=W||o.y>=H)continue;
-    const target=key(o.x,o.y);
-    if(!moved[target]&&!(o.x===player.x&&o.y===player.y)){
-      delete moved[p];
-      moved[target]=obj;
-      break;
+function pickQuestion(stats, boss) {
+  const tables = Object.keys(stats).map(Number);
+  const weighted = [];
+  for (const t of tables) {
+    const s = stats[t];
+    let weight = 3;
+    if (s.attempts === 0) weight += 4;
+    weight += s.wrong * 2;
+    if (s.streak >= 3) weight -= 2;
+    if (boss.tableBias.includes(t)) weight += 2;
+    for (let i = 0; i < Math.max(1, weight); i++) weighted.push(t);
+  }
+  const a = weighted[Math.floor(Math.random() * weighted.length)] || 2;
+  const b = Math.floor(Math.random() * 12) + 1;
+  return { a, b, answer: a * b };
+}
+
+export default function Page() {
+  const [game, setGame] = useState(initialState);
+  const [hydrated, setHydrated] = useState(false);
+  const [selected, setSelected] = useState(null);
+  const [question, setQuestion] = useState(null);
+  const [answer, setAnswer] = useState('');
+  const [feedback, setFeedback] = useState('');
+  const [showProgress, setShowProgress] = useState(false);
+  const [showHelp, setShowHelp] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem('mathcraft-v090');
+      if (saved) setGame(JSON.parse(saved));
+    } catch {}
+    setHydrated(true);
+  }, []);
+
+  useEffect(() => {
+    if (hydrated) localStorage.setItem('mathcraft-v090', JSON.stringify(game));
+  }, [game, hydrated]);
+
+  const boss = BOSSES[game.bossIndex];
+  const board = useMemo(() => makeBoard(game.boardSeed, game.bossIndex), [game.boardSeed, game.bossIndex]);
+  const movable = useMemo(() => {
+    const set = new Set();
+    const dirs = [[1,0],[-1,0],[0,1],[0,-1]];
+    dirs.forEach(([dx, dy]) => {
+      const p = { x: game.player.x + dx, y: game.player.y + dy };
+      if (p.x >= 0 && p.y >= 0 && p.x < GRID && p.y < GRID) set.add(keyOf(p));
+    });
+    return set;
+  }, [game.player]);
+
+  function tileAt(pos) { return board[pos.y]?.[pos.x] || { type: 'empty' }; }
+
+  function appendLog(text) {
+    setGame(g => ({ ...g, log: [text, ...g.log].slice(0, 3) }));
+  }
+
+  function tapTile(x, y) {
+    const pos = { x, y };
+    if (!adjacent(game.player, pos)) {
+      setFeedback('Tap one of the glowing neighbour tiles.');
+      return;
     }
-   }
-  }
-  return moved;
- }
-
- function summonBoss(){
-  setBossMode(true);
-  setWorldState(world(stage,true));
-  setPlayer({x:0,y:0});
-  setSelected(null);
-  setMessage(`🐉 ${CAMPAIGN[stage].boss.name} has appeared!`);
- }
-
- function nextStage(){
-  if(stage===2){
-   setCampaignComplete(true);
-   setMessage("🏆 Campaign complete!");
-   return;
-  }
-  const n=stage+1;
-  setStage(n);
-  setBossMode(false);
-  setWorldState(world(n,false));
-  setPlayer({x:0,y:0});
-  setSelected(null);
-  setQ(makeProblem(CAMPAIGN[n].tables,stats));
- }
-
- function solve(){
-  if(!selectedObj)return;
-
-  const correct=Number(answer)===q.answer;
-  const updated=updateStats(stats,q,correct);
-  setStats(updated);
-
-  if(!correct){
-   setMessage(`❌ Wrong! Monsters move closer. Correct answer: ${q.answer}`);
-   setWorldState(moveMonsters(worldState));
-   setQ(makeProblem(tables,updated));
-   setAnswer("");
-   return;
-  }
-
-  let next={...worldState};
-  const p=key(selected.x,selected.y);
-
-  if(selectedObj.kind==="block"){
-   delete next[p];
-   setInventory(v=>({...v,[selectedObj.resource]:v[selectedObj.resource]+1}));
-   setScore(s=>s+1);
-  }
-
-  if(selectedObj.kind==="monster"){
-   const hit=Math.random()<0.2 ? weapon.damage*2 : weapon.damage;
-   const hp=selectedObj.currentHp-hit;
-
-   if(hp<=0){
-    delete next[p];
-
-    if(selectedObj.isBoss){
-      setInventory(v=>({...v,trophies:[...v.trophies,{name:selectedObj.name,emoji:selectedObj.emoji}]}));
-      setTimeout(nextStage,700);
-    } else {
-      setScore(s=>s+5);
+    const tile = tileAt(pos);
+    setSelected(pos);
+    if (tile.type === 'empty' || tile.type === 'base') {
+      setGame(g => ({ ...g, player: pos }));
+      setFeedback('Moved.');
+      return;
     }
-   } else {
-    next[p]={...selectedObj,currentHp:hp};
-   }
+    setQuestion({ ...pickQuestion(game.stats, boss), target: pos, type: tile.type });
+    setAnswer('');
+    setFeedback('Solve to act!');
   }
 
-  const remaining=Object.values(next).filter(o=>o.kind==="monster").length;
-
-  if(!bossMode&&remaining===0){
-    setWorldState(next);
-    setTimeout(summonBoss,500);
-  } else {
-    setWorldState(moveMonsters(next));
+  function monsterPressure(wasWrong = false) {
+    setGame(g => {
+      let lives = g.lives;
+      let player = g.player;
+      let log = g.log;
+      if (wasWrong) {
+        lives -= 1;
+        log = ['A monster attacks! Lose one life.', ...log].slice(0, 3);
+      }
+      if (lives <= 0) {
+        lives = 3;
+        player = START_POS;
+        log = ['Back to base! Take a breath and try again.', ...log].slice(0, 3);
+      }
+      return { ...g, lives, player, log };
+    });
   }
 
-  setSelected(null);
-  setAnswer("");
-  setQ(makeProblem(tables,updated));
- }
+  function solve() {
+    if (!question) return;
+    const value = Number(answer);
+    if (!Number.isFinite(value)) return;
+    const correct = value === question.answer;
+    setGame(g => {
+      const stats = { ...g.stats, [question.a]: { ...g.stats[question.a] } };
+      stats[question.a].attempts += 1;
+      if (correct) {
+        stats[question.a].correct += 1;
+        stats[question.a].streak += 1;
+      } else {
+        stats[question.a].wrong += 1;
+        stats[question.a].streak = 0;
+      }
+      if (!correct) return { ...g, stats };
 
- function craft(i){
-  if(i<=weaponIndex)return;
-  const w=WEAPONS[i];
-  const ok=Object.entries(w.cost).every(([r,a])=>inventory[r]>=a);
-  if(!ok){setMessage(`Need more resources for ${w.name}`);return;}
-  const next={...inventory};
-  Object.entries(w.cost).forEach(([r,a])=>next[r]-=a);
-  setInventory(next);
-  setWeaponIndex(i);
- }
-
- function reset(){
-  localStorage.removeItem(SAVE_KEY);
-  location.reload();
- }
-
- const practice=tables.filter(t=>mastery(stats,t)==="practice");
- const strong=tables.filter(t=>mastery(stats,t)==="strong");
-
- return <main style={styles.main}>
-  <div style={styles.container}>
-   <h1 style={styles.title}>MathCraft v8</h1>
-   <p style={styles.subtitle}>Mobile controls + tap-to-move + adaptive learning</p>
-
-   <div style={styles.topbar}>
-    <div>{"❤️".repeat(lives)}</div>
-    <div>⚔️ {weapon.emoji} {weapon.name}</div>
-    <div>⭐ {score}</div>
-   </div>
-
-   <div style={styles.layout}>
-    <section style={styles.panel}>
-      <p style={{color:"#bbf7d0",marginTop:0}}>Tap glowing green squares to move. Tap monsters or blocks to select.</p>
-      <div style={{display:"grid",gridTemplateColumns:`repeat(${W},1fr)`,gap:10}}>
-      {Array.from({length:W*H}).map((_,i)=>{
-       const x=i%W,y=Math.floor(i/W);
-       const obj=worldState[key(x,y)];
-       const isPlayer=player.x===x&&player.y===y;
-       const isSelected=selected&&selected.x===x&&selected.y===y;
-       const reachable=isReachable(x,y);
-       const moved=lastMove&&lastMove.x===x&&lastMove.y===y;
-
-       return <div key={i} onClick={()=>clickTile(x,y)} style={{
-        ...styles.tile,
-        outline:isSelected?"4px solid gold":reachable?"4px solid #86efac":"none",
-        transform:moved?"scale(1.08)":"scale(1)",
-        background:obj?.kind==="monster"
-         ? obj.isBoss
-          ? "linear-gradient(135deg,#991b1b,#431407)"
-          : "linear-gradient(135deg,#7f1d1d,#111827)"
-         : obj?.kind==="block"
-          ? "linear-gradient(135deg,#6b7280,#374151)"
-          : reachable
-           ? "linear-gradient(135deg,#22c55e,#166534)"
-           : styles.tile.background
-       }}>
-        {isPlayer?"🧍":obj?obj.emoji:reachable?"·":""}
-
-        {obj?.kind==="monster" &&
-          <div style={styles.hpOuter}>
-            <div style={{...styles.hpInner,width:`${(obj.currentHp/obj.maxHp)*100}%`}}/>
-          </div>
+      let next = { ...g, stats, player: question.target, stars: g.stars + 1 };
+      if (question.type === 'wood') next.wood += 1;
+      if (question.type === 'rock') next.stone += 1;
+      if (question.type === 'gem') next.gems += 1;
+      if (question.type === 'chest') { next.gems += 1; next.wood += 1; }
+      if (question.type === 'monster') next.stars += 2;
+      if (question.type === 'boss') {
+        const newHp = Math.max(0, g.bossHp - g.weapon.power);
+        next.bossHp = newHp;
+        if (newHp === 0) {
+          const trophy = `${boss.emoji} ${boss.name}`;
+          const nextBoss = Math.min(g.bossIndex + 1, BOSSES.length - 1);
+          next.trophies = Array.from(new Set([...g.trophies, trophy]));
+          next.bossIndex = nextBoss;
+          next.bossHp = BOSSES[nextBoss].hp;
+          next.boardSeed = g.boardSeed + 1;
+          next.player = START_POS;
+          next.log = [`Boss defeated: ${boss.name}!`, ...g.log].slice(0, 3);
         }
-       </div>
-      })}
+      }
+      if (next.wood >= 2 && next.stone >= 2 && next.weapon.power < 7) {
+        next.weapon = { name: 'Stone Sword', power: 7, emoji: '🗡️' };
+        next.wood -= 2; next.stone -= 2;
+      }
+      if (next.gems >= 3 && next.weapon.power < 10) {
+        next.weapon = { name: 'Diamond Sword', power: 10, emoji: '💎⚔️' };
+        next.gems -= 3;
+      }
+      next.log = [`Correct! ${TILE_TYPES[question.type]?.label || 'Action'} cleared.`, ...(next.log || g.log)].slice(0, 3);
+      return next;
+    });
+
+    if (!correct) {
+      setFeedback(`Not quite. ${question.a} × ${question.b} = ${question.answer}`);
+      monsterPressure(true);
+    } else {
+      setFeedback('Great!');
+      setQuestion(null);
+      setSelected(null);
+    }
+  }
+
+  const weakTables = Object.entries(game.stats).filter(([,s]) => s.wrong > 0 || s.streak < 2).slice(0, 5).map(([t]) => t);
+  const strongTables = Object.entries(game.stats).filter(([,s]) => s.streak >= 3).map(([t]) => t);
+
+  return (
+    <main>
+      <div className="phoneShell">
+        <header className="topbar">
+          <div>
+            <div className="title">MathCraft</div>
+            <div className="version">{VERSION}</div>
+          </div>
+          <button className="smallBtn" onClick={() => setShowHelp(true)}>?</button>
+        </header>
+
+        <section className="statusBar">
+          <span>{'❤️'.repeat(game.lives)}</span>
+          <span>{game.weapon.emoji} {game.weapon.name}</span>
+          <span>⭐ {game.stars}</span>
+        </section>
+
+        <section className="bossBar">
+          <div><b>{boss.emoji} {boss.name}</b></div>
+          <div className="hpTrack"><div className="hpFill" style={{ width: `${(game.bossHp / boss.hp) * 100}%` }} /></div>
+        </section>
+
+        <section className="boardWrap">
+          <div className="board">
+            {board.map((row, y) => row.map((tile, x) => {
+              const pos = { x, y };
+              const isPlayer = game.player.x === x && game.player.y === y;
+              const canMove = movable.has(keyOf(pos));
+              const isSelected = selected?.x === x && selected?.y === y;
+              return (
+                <button key={`${x}-${y}`} className={`tile ${canMove ? 'move' : ''} ${isSelected ? 'selected' : ''}`} onClick={() => tapTile(x, y)}>
+                  <span>{isPlayer ? '🧍' : (tile.type === 'base' ? '🏠' : TILE_TYPES[tile.type]?.emoji)}</span>
+                </button>
+              );
+            }))}
+          </div>
+        </section>
+
+        <section className={`actionSheet ${question ? 'open' : ''}`}>
+          {question ? (
+            <>
+              <div className="sheetLabel">{TILE_TYPES[question.type]?.emoji} Action challenge</div>
+              <div className="sum">{question.a} × {question.b} = ?</div>
+              <div className="answerRow">
+                <input inputMode="numeric" value={answer} onChange={e => setAnswer(e.target.value.replace(/[^0-9]/g, ''))} autoFocus />
+                <button onClick={solve}>Solve</button>
+              </div>
+            </>
+          ) : (
+            <div className="hint">Tap a glowing tile. Solve questions to mine, fight, and collect.</div>
+          )}
+        </section>
+
+        <nav className="bottomNav">
+          <button onClick={() => setShowProgress(true)}>🧠 Progress</button>
+          <button onClick={() => appendLog('Crafting happens automatically when you have enough resources.')}>🛠️ Craft</button>
+          <button onClick={() => setGame(g => ({ ...g, boardSeed: g.boardSeed + 1, player: START_POS }))}>🗺️ New room</button>
+        </nav>
+
+        <section className="miniLog">
+          <div>{feedback || game.log[0]}</div>
+          <div className="resources">🪵 {game.wood} · 🪨 {game.stone} · 💎 {game.gems}</div>
+        </section>
       </div>
 
-      <div style={styles.dpad}>
-        <div></div>
-        <button style={styles.dpadBtn} onClick={()=>move(0,-1)}>⬆️</button>
-        <div></div>
-        <button style={styles.dpadBtn} onClick={()=>move(-1,0)}>⬅️</button>
-        <button style={styles.dpadBtn} onClick={()=>move(0,1)}>⬇️</button>
-        <button style={styles.dpadBtn} onClick={()=>move(1,0)}>➡️</button>
-      </div>
-    </section>
-
-    <aside style={{display:"grid",gap:16}}>
-      <section style={styles.panel}>
-       <h2>🧮 Action</h2>
-       <div style={styles.question}>{q.a} × {q.b} = ?</div>
-       <input value={answer} onChange={e=>setAnswer(e.target.value.replace(/[^0-9]/g,""))} onKeyDown={e=>e.key==="Enter"&&solve()} style={styles.input}/>
-       <button onClick={solve} style={styles.button}>Solve</button>
-      </section>
-
-      <section style={styles.panel}>
-       <h2>🧠 Adaptive Engine</h2>
-       <p>Needs practice: {practice.length?practice.map(t=>`×${t}`).join(", "):"none"}</p>
-       <p>Strong tables: {strong.length?strong.map(t=>`×${t}`).join(", "):"building..."}</p>
-       <div style={styles.tableGrid}>
-       {tables.map(t=>{
-        const m=mastery(stats,t);
-        return <div key={t} style={{...styles.mastery,background:m==="strong"?"#14532d":m==="practice"?"#7f1d1d":"#1f2937"}}>
-         <strong>×{t}</strong><small>{m}</small>
-        </div>
-       })}
-       </div>
-      </section>
-
-      <section style={styles.panel}>
-       <h2>⚔️ Weapons</h2>
-       {WEAPONS.map((w,i)=><button key={w.name} onClick={()=>craft(i)} style={styles.smallButton}>{i<=weaponIndex?"Unlocked":"Craft"} {w.emoji} {w.name}</button>)}
-      </section>
-
-      <section style={styles.panel}>
-       <h2>🏆 Boss Gallery</h2>
-       {[0,1,2].map(i=>{
-        const t=inventory.trophies[i];
-        return <div key={i} style={{padding:12,borderRadius:12,marginBottom:10,background:t?"#14532d":"#1f2937"}}>
-         {t?`${t.emoji} ${t.name}`:"Locked Trophy"}
-        </div>
-       })}
-      </section>
-
-      <section style={styles.panel}>
-       <p>{message}</p>
-       <button onClick={reset} style={styles.resetButton}>Reset campaign</button>
-      </section>
-    </aside>
-   </div>
-  </div>
- </main>
+      {showProgress && <Modal title="Adaptive Engine" onClose={() => setShowProgress(false)}>
+        <p>The game gives more practice to tables that need it and reduces tables with strong streaks.</p>
+        <div className="chips"><b>Needs practice:</b> {weakTables.length ? weakTables.map(t => <span key={t}>×{t}</span>) : 'None yet'}</div>
+        <div className="chips"><b>Strong:</b> {strongTables.length ? strongTables.map(t => <span key={t}>×{t}</span>) : 'Build a 3-answer streak'}</div>
+      </Modal>}
+      {showHelp && <Modal title="How to play" onClose={() => setShowHelp(false)}>
+        <p>Tap a glowing neighbouring square to move. If the square has a rock, wood, gem, monster, chest, or boss, answer a multiplication question to act.</p>
+        <p>Wrong answers cost a life, but there is no shame: when lives run out, you go back to base and continue.</p>
+      </Modal>}
+      <style jsx global>{styles}</style>
+    </main>
+  );
 }
 
-const styles={
- main:{minHeight:"100vh",background:"linear-gradient(135deg,#052e16,#111827)",color:"white",fontFamily:"Arial",padding:16},
- container:{maxWidth:1200,margin:"0 auto"},
- title:{fontSize:"clamp(32px,6vw,46px)",marginBottom:6},
- subtitle:{color:"#bbf7d0",fontSize:"clamp(16px,3vw,20px)"},
- topbar:{display:"flex",gap:14,fontSize:"clamp(18px,4vw,22px)",marginBottom:18,flexWrap:"wrap"},
- layout:{display:"grid",gridTemplateColumns:"minmax(0,1.2fr) minmax(300px,.8fr)",gap:20},
- panel:{background:"#0f172a",border:"2px solid #22c55e",borderRadius:22,padding:16},
- tile:{position:"relative",width:"100%",aspectRatio:"1/1",borderRadius:14,border:"2px solid #14532d",background:"linear-gradient(135deg,#166534,#052e16)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:"clamp(28px,6vw,42px)",cursor:"pointer",transition:"all .18s ease",touchAction:"manipulation"},
- hpOuter:{position:"absolute",bottom:6,left:8,right:8,height:7,borderRadius:8,background:"#111827",overflow:"hidden"},
- hpInner:{height:"100%",background:"#ef4444"},
- question:{fontSize:"clamp(40px,8vw,58px)",fontWeight:"bold",margin:"16px 0"},
- input:{width:"100%",boxSizing:"border-box",fontSize:30,padding:14,textAlign:"center",borderRadius:14,border:"none",marginBottom:12},
- button:{width:"100%",fontSize:22,padding:"14px 18px",borderRadius:14,border:"none",background:"#22c55e",color:"#052e16",fontWeight:"bold"},
- smallButton:{width:"100%",marginTop:8,padding:10,borderRadius:12,border:"1px solid #22c55e",background:"transparent",color:"#bbf7d0"},
- resetButton:{width:"100%",marginTop:12,padding:10,borderRadius:12,border:"1px solid #ef4444",background:"transparent",color:"#fecaca"},
- tableGrid:{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8},
- mastery:{borderRadius:10,padding:8,display:"grid",gap:3},
- dpad:{display:"grid",gridTemplateColumns:"repeat(3,64px)",gap:8,justifyContent:"center",marginTop:18},
- dpadBtn:{width:64,height:54,borderRadius:16,border:"2px solid #22c55e",background:"#052e16",color:"white",fontSize:24}
+function Modal({ title, children, onClose }) {
+  return <div className="modalBackdrop" onClick={onClose}>
+    <div className="modal" onClick={e => e.stopPropagation()}>
+      <div className="modalHead"><h2>{title}</h2><button onClick={onClose}>×</button></div>
+      {children}
+    </div>
+  </div>;
 }
+
+const styles = `
+*{box-sizing:border-box} html,body{margin:0;background:#07130e;color:#fff;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif} button,input{font:inherit}
+main{min-height:100dvh;background:linear-gradient(180deg,#042512,#07130e);display:flex;justify-content:center}.phoneShell{width:100%;max-width:520px;min-height:100dvh;padding:12px;display:grid;grid-template-rows:auto auto auto 1fr auto auto auto;gap:8px}.topbar{display:flex;justify-content:space-between;align-items:center;padding:6px 4px}.title{font-size:clamp(24px,7vw,36px);font-weight:900;line-height:1}.version{font-size:12px;opacity:.7;margin-top:3px}.smallBtn{width:38px;height:38px;border-radius:999px;border:2px solid #2ecc71;background:#102018;color:#fff;font-weight:900}.statusBar,.bossBar,.miniLog{background:rgba(9,20,34,.82);border:2px solid rgba(46,204,113,.55);border-radius:18px;padding:10px}.statusBar{display:flex;gap:10px;align-items:center;justify-content:space-between;font-weight:800;font-size:14px;white-space:nowrap;overflow:hidden}.bossBar{display:grid;gap:6px}.hpTrack{height:12px;background:#243044;border-radius:20px;overflow:hidden}.hpFill{height:100%;background:linear-gradient(90deg,#22c55e,#facc15,#ef4444);border-radius:20px}.boardWrap{min-height:0;display:flex;align-items:center;justify-content:center}.board{width:min(94vw,500px);aspect-ratio:1/1;display:grid;grid-template-columns:repeat(6,1fr);gap:7px;padding:8px;border:3px solid #2ecc71;border-radius:24px;background:rgba(2,10,20,.75);box-shadow:0 16px 40px rgba(0,0,0,.35)}.tile{border:0;border-radius:18px;background:linear-gradient(145deg,#0d5a2d,#08391d);box-shadow:inset 0 -6px 0 rgba(0,0,0,.25),0 2px 0 rgba(255,255,255,.08);display:flex;align-items:center;justify-content:center;font-size:clamp(26px,9vw,48px);min-width:0;min-height:0;color:#fff}.tile.move{outline:4px solid #66ff99;animation:pulse 1.1s infinite}.tile.selected{outline:4px solid #facc15}@keyframes pulse{50%{filter:brightness(1.35);transform:scale(1.03)}}.actionSheet{background:rgba(9,20,34,.95);border:2px solid rgba(46,204,113,.55);border-radius:22px;padding:12px;min-height:66px}.actionSheet.open{border-color:#66ff99}.sheetLabel{font-weight:800;opacity:.9}.sum{font-size:clamp(36px,12vw,56px);font-weight:950;margin:2px 0 8px}.answerRow{display:grid;grid-template-columns:1fr 120px;gap:10px}.answerRow input{height:54px;border-radius:16px;border:0;padding:0 16px;font-size:28px;font-weight:900}.answerRow button,.bottomNav button{border:0;border-radius:16px;background:#27c463;color:#06120b;font-weight:950}.bottomNav{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}.bottomNav button{min-height:48px;font-size:14px}.hint{font-weight:700;opacity:.88}.miniLog{font-size:13px;display:flex;justify-content:space-between;gap:8px}.resources{white-space:nowrap;font-weight:900}.modalBackdrop{position:fixed;inset:0;background:rgba(0,0,0,.65);display:flex;align-items:flex-end;justify-content:center;padding:14px;z-index:10}.modal{width:100%;max-width:520px;background:#101827;border:2px solid #2ecc71;border-radius:24px;padding:18px;box-shadow:0 20px 60px rgba(0,0,0,.45)}.modalHead{display:flex;justify-content:space-between;align-items:center}.modal h2{margin:0;font-size:24px}.modalHead button{width:38px;height:38px;border-radius:50%;border:0;background:#23304a;color:#fff;font-size:24px}.chips{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.chips span{background:#173b29;border:1px solid #2ecc71;border-radius:999px;padding:6px 10px;font-weight:900}@media (min-width:760px){.phoneShell{max-width:760px}.board{width:min(66vh,560px)}.statusBar{font-size:16px}.bottomNav button{font-size:16px}}
+`;
