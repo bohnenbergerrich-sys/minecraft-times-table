@@ -1,7 +1,7 @@
 import "./globals.css";
 
 export const metadata = {
-  title: "MathCraft v0.10.2",
+  title: "MathCraft v0.10.3",
   description: "Dungeon loop with boss reveal and monster gallery",
 };
 
